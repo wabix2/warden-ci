@@ -1,0 +1,897 @@
+content="Warden CI — Catch the Package That Doesn't Exist, Before It Merges">
+<meta name="twitter:description" content="Scans every pull request for hallucinated npm/PyPI imports, hardcoded secrets, and unsafe eval() — posted straight to your GitHub check.">
+<meta name="twitter:image" content="https://wardenci.dev/assets/og-image.png">
+
+<!-- ============================================================= -->
+<!-- Icons -->
+<!-- ============================================================= -->
+<link rel="icon" href="/assets/warden-ci-logo.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon-180.png">
+<link rel="manifest" href="/site.webmanifest">
+
+<!-- ============================================================= -->
+<!-- Structured data -->
+<!-- ============================================================= -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Warden CI",
+  "url": "https://wardenci.dev/",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "GitHub",
+  "description": "Warden CI is a GitHub App that scans pull requests for hallucinated npm and PyPI package imports, typosquat-suspect dependencies, hardcoded secrets, and unsafe eval()/exec() patterns, posting findings as a GitHub Check.",
+  "image": "https://wardenci.dev/assets/og-image.png",
+  "publisher": { "@type": "Organization", "name": "Focus Switch" },
+  "offers": [
+    {
+      "@type": "Offer",
+      "name": "Free",
+      "price": "0",
+      "priceCurrency": "USD",
+      "description": "Automated scanning for public repositories."
+    },
+    {
+      "@type": "Offer",
+      "name": "Pro",
+      "price": "19.00",
+      "priceCurrency": "USD",
+      "description": "Everything in Free, plus scanning of private repositories. 14-day free trial."
+    }
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is a hallucinated package?",
+      "acceptedAnswer": { "@type": "Answer", "text": "When an AI coding tool invents a plausible-looking package name that doesn't actually exist on npm or PyPI. If an attacker registers that exact name later — a technique known as slopsquatting — anyone who installs it runs whatever code the attacker put there." }
+    },
+    {
+      "@type": "Question",
+      "name": "Does Warden CI read or store my source code?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Warden CI reads the diff of a pull request in memory to run its checks, then discards it. No source code is written to disk or a database." }
+    },
+    {
+      "@type": "Question",
+      "name": "Which package ecosystems are supported?",
+      "acceptedAnswer": { "@type": "Answer", "text": "npm (JavaScript/TypeScript) and PyPI (Python) today. Each ecosystem is a self-contained adapter, so more registries are planned." }
+    },
+    {
+      "@type": "Question",
+      "name": "Will Warden CI block my pull requests?",
+      "acceptedAnswer": { "@type": "Answer", "text": "No. By default, findings post as a non-blocking GitHub Check alongside your other CI status checks — merges are never blocked automatically." }
+    },
+    {
+      "@type": "Question",
+      "name": "What's included in the Free plan?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Unlimited automated scanning of public repositories, at no cost. Private repositories require the Pro plan." }
+    },
+    {
+      "@type": "Question",
+      "name": "What actually triggers a scan?",
+      "acceptedAnswer": { "@type": "Answer", "text": "The GitHub pull_request webhook events opened, synchronize (new commits pushed to an open PR), and reopened. Each one re-scans only the lines added since the last check." }
+    }
+  ]
+}
+</script>
+
+<!-- Google Analytics (GA4) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-XBE18HJZ5V"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-XBE18HJZ5V');
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink: '#090d12',
+          surface: '#0f151c',
+          surface2: '#141c25',
+          line: '#212b35',
+          brand: {
+            DEFAULT: '#7c6cff',
+            dim: '#5b4fd6',
+            bright: '#9a8dff',
+          },
+          added: '#3fb950',
+          removed: '#f85149',
+          warn: '#d29922',
+          ink2: '#8c9aaa',
+        },
+        fontFamily: {
+          display: ['"Space Grotesk"', 'sans-serif'],
+          body: ['"Inter"', 'sans-serif'],
+          mono: ['"JetBrains Mono"', 'monospace'],
+        },
+      },
+    },
+  };
+</script>
+
+<style>
+  html { background: #090d12; }
+  body {
+    font-family: 'Inter', sans-serif;
+    background-color: #090d12;
+    background-image:
+      radial-gradient(ellipse 900px 500px at 85% -10%, rgba(124,108,255,0.16), transparent 60%),
+      radial-gradient(ellipse 700px 500px at -10% 40%, rgba(63,185,80,0.08), transparent 60%),
+      linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.028) 1px, transparent 1px);
+    background-size: auto, auto, 56px 56px, 56px 56px;
+    background-attachment: fixed;
+  }
+  .font-display { font-family: 'Space Grotesk', sans-serif; }
+  .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+  ::selection { background: rgba(124,108,255,0.35); color: #fff; }
+
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-track { background: #090d12; }
+  ::-webkit-scrollbar-thumb { background: #23303b; border-radius: 8px; }
+  ::-webkit-scrollbar-thumb:hover { background: #2f3f4d; }
+
+  :focus-visible { outline: 2px solid #9a8dff; outline-offset: 3px; border-radius: 4px; }
+
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s cubic-bezier(.2,.7,.2,1), transform .7s cubic-bezier(.2,.7,.2,1); }
+  .reveal.is-visible { opacity: 1; transform: translateY(0); }
+
+  .glow-border { position: relative; }
+  .glow-border::before {
+    content: '';
+    position: absolute; inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(135deg, rgba(124,108,255,0.55), rgba(63,185,80,0.15), transparent 60%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .brand-gradient {
+    background: linear-gradient(100deg, #9a8dff 0%, #7c6cff 45%, #62e39c 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #8d7dff, #7c6cff);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.25) inset, 0 10px 30px -8px rgba(124,108,255,0.55);
+  }
+  .btn-primary:hover { box-shadow: 0 1px 0 rgba(255,255,255,0.3) inset, 0 14px 34px -6px rgba(124,108,255,0.7); transform: translateY(-1px); }
+  .btn-primary:active { transform: translateY(0); }
+
+  .term-cursor { display:inline-block; width:8px; height:1.1em; background:#9a8dff; vertical-align:-2px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .diff-line { opacity: 0; transform: translateX(-6px); white-space: pre; }
+  .diff-line.shown { opacity: 1; transform: translateX(0); transition: opacity .35s ease, transform .35s ease; }
+
+  .badge-pop { opacity: 0; transform: scale(.85) translateY(2px); }
+  .badge-pop.shown { opacity: 1; transform: scale(1) translateY(0); transition: opacity .3s ease, transform .3s cubic-bezier(.34,1.56,.64,1); }
+
+  .check-card { opacity: 0; transform: translateY(10px); }
+  .check-card.shown { opacity: 1; transform: translateY(0); transition: opacity .45s ease, transform .45s ease; }
+
+  .ambient-spot {
+    background: radial-gradient(600px circle at var(--x,50%) var(--y,20%), rgba(124,108,255,0.10), transparent 55%);
+  }
+
+  .marquee-track { animation: marquee 34s linear infinite; }
+  @keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+  .num-tick { font-variant-numeric: tabular-nums; }
+
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  details[open] .faq-chevron { transform: rotate(45deg); }
+  .faq-chevron { transition: transform .25s ease; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
+    .marquee-track { animation: none !important; }
+    * { scroll-behavior: auto !important; }
+  }
+</style>
+</head>
+<body class="text-slate-100 font-body antialiased">
+
+<a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[999] focus:bg-brand focus:text-white focus:px-4 focus:py-2 focus:rounded-lg">Skip to content</a>
+
+<!-- ============================================================= -->
+<!-- Nav -->
+<!-- ============================================================= -->
+<header id="site-header" class="sticky top-0 z-50 transition-all duration-300 border-b border-transparent">
+  <div class="absolute inset-0 bg-ink/70 backdrop-blur-xl border-b border-line/70 transition-opacity" id="header-bg"></div>
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between relative">
+    <a href="#main" class="flex items-center gap-2.5 group">
+      <img src="/assets/warden-ci-logo.svg" alt="" class="w-8 h-8 group-hover:scale-105 transition-transform" width="32" height="32">
+      <span class="text-lg font-display font-bold tracking-tight text-white">Warden <span class="text-brand-bright">CI</span></span>
+    </a>
+    <nav class="hidden md:flex items-center gap-8 text-sm font-medium text-slate-300">
+      <a href="#product" class="hover:text-white transition">Product</a>
+      <a href="#how-it-works" class="hover:text-white transition">How it works</a>
+      <a href="#security" class="hover:text-white transition">Security</a>
+      <a href="#pricing" class="hover:text-white transition">Pricing</a>
+      <a href="#faq" class="hover:text-white transition">FAQ</a>
+    </nav>
+    <div class="flex items-center gap-3">
+      <a href="https://github.com/marketplace/warden-ci" target="_blank" rel="noopener" class="hidden sm:inline-flex btn-primary text-white text-sm font-semibold px-4 py-2 rounded-lg transition items-center gap-2">
+        <svg viewBox="0 0 16 16" class="w-4 h-4 fill-current"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        Install on GitHub
+      </a>
+      <button id="mobile-menu-btn" class="md:hidden w-9 h-9 flex items-center justify-center text-slate-300 hover:text-white" aria-label="Toggle menu" aria-expanded="false">
+        <svg id="icon-open" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+        <svg id="icon-close" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+  </div>
+  <div id="mobile-menu" class="hidden md:hidden relative border-t border-line bg-ink/95 backdrop-blur-xl">
+    <nav class="px-4 py-4 flex flex-col gap-1 text-sm font-medium text-slate-300">
+      <a href="#product" class="py-2.5 hover:text-white transition">Product</a>
+      <a href="#how-it-works" class="py-2.5 hover:text-white transition">How it works</a>
+      <a href="#security" class="py-2.5 hover:text-white transition">Security</a>
+      <a href="#pricing" class="py-2.5 hover:text-white transition">Pricing</a>
+      <a href="#faq" class="py-2.5 hover:text-white transition">FAQ</a>
+      <a href="https://github.com/marketplace/warden-ci" target="_blank" rel="noopener" class="mt-2 btn-primary text-white text-sm font-semibold px-4 py-2.5 rounded-lg text-center">Install on GitHub — Free</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ============================================================= -->
+  <!-- Hero -->
+  <!-- ============================================================= -->
+  <section id="hero" class="relative overflow-hidden pt-16 pb-20 sm:pt-20 sm:pb-28 ambient-spot">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="grid lg:grid-cols-2 gap-12 lg:gap-8 items-center">
+
+        <div class="reveal">
+          <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand/10 border border-brand/25 text-brand-bright text-xs font-mono font-medium mb-7">
+            <span class="relative flex h-1.5 w-1.5">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-bright opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-brand-bright"></span>
+            </span>
+            built for pull requests written with AI
+          </div>
+
+          <h1 class="text-4xl sm:text-5xl lg:text-[3.4rem] font-display font-bold tracking-tight text-white mb-6 leading-[1.08]">
+            The package that<br class="hidden sm:block"> doesn't exist is<br class="hidden sm:block">
+            <span class="brand-gradient">still one import away.</span>
+          </h1>
+
+          <p class="text-lg text-slate-400 mb-8 max-w-xl leading-relaxed">
+            Warden CI scans every pull request the moment it opens — flags npm and PyPI imports that don't exist on the real registry, hardcoded secrets, and unguarded <code class="font-mono text-slate-300 bg-white/5 px-1.5 py-0.5 rounded">eval()</code> — then posts the result straight to your GitHub check. Nothing about your code is stored.
+          </p>
+
+          <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-9">
+            <a href="https://github.com/marketplace/warden-ci" target="_blank" rel="noopener" class="w-full sm:w-auto btn-primary text-white font-semibold px-7 py-3.5 rounded-xl transition flex items-center justify-center gap-2.5 text-[15px]">
+              <svg viewBox="0 0 16 16" class="w-[18px] h-[18px] fill-current"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+              Install on GitHub — Free
+            </a>
+            <a href="#how-it-works" class="w-full sm:w-auto text-slate-300 hover:text-white font-medium px-2 py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-[15px] group">
+              See how a scan runs
+              <svg class="w-4 h-4 group-hover:translate-y-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+            </a>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-x-6 gap-y-3 font-mono text-xs text-ink2">
+            <span class="flex items-center gap-1.5"><svg class="w-3.5 h-3.5 text-added" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.4 7.4a1 1 0 01-1.4 0L3.3 9.5a1 1 0 111.4-1.4l3.9 3.9 6.7-6.7a1 1 0 011.4 0z" clip-rule="evenodd"/></svg>checked live against npm & PyPI</span>
+            <span class="flex items-center gap-1.5"><svg class="w-3.5 h-3.5 text-added" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.4 7.4a1 1 0 01-1.4 0L3.3 9.5a1 1 0 111.4-1.4l3.9 3.9 6.7-6.7a1 1 0 011.4 0z" clip-rule="evenodd"/></svg>diff-only, never legacy code</span>
+            <span class="flex items-center gap-1.5"><svg class="w-3.5 h-3.5 text-added" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.4 7.4a1 1 0 01-1.4 0L3.3 9.5a1 1 0 111.4-1.4l3.9 3.9 6.7-6.7a1 1 0 011.4 0z" clip-rule="evenodd"/></svg>doesn't block merges</span>
+          </div>
+        </div>
+
+        <!-- Live terminal / diff demo -->
+        <div class="reveal" style="transition-delay:.1s">
+          <div class="glow-border rounded-2xl bg-surface border border-line shadow-2xl shadow-black/40 overflow-hidden">
+            <div class="flex items-center gap-2 px-4 py-3 border-b border-line bg-surface2/60">
+              <span class="w-3 h-3 rounded-full bg-[#f85149]/70"></span>
+              <span class="w-3 h-3 rounded-full bg-[#d29922]/70"></span>
+              <span class="w-3 h-3 rounded-full bg-[#3fb950]/70"></span>
+              <span class="ml-3 font-mono text-xs text-ink2">feature/add-pagination.diff — checked by Warden CI</span>
+            </div>
+            <div id="diff-panel" class="font-mono text-[13px] leading-6 p-5 min-h-[220px]">
+              <!-- populated by JS -->
+            </div>
+            <div id="check-card" class="check-card mx-5 mb-5 rounded-xl border border-line bg-surface2/70 px-4 py-3.5">
+              <div class="flex items-center justify-between mb-2.5">
+                <span class="flex items-center gap-2 font-mono text-xs font-semibold text-white">
+                  <img src="/assets/warden-ci-logo.svg" class="w-4 h-4" alt="">
+                  Warden CI — check run
+                </span>
+                <span id="check-status" class="font-mono text-[11px] px-2 py-0.5 rounded-full border border-removed/40 text-removed bg-removed/10">2 findings</span>
+              </div>
+              <ul class="space-y-1.5 font-mono text-xs text-ink2">
+                <li class="flex items-start gap-2"><span class="text-removed mt-0.5">✕</span> react-fast-pagination not found on npm registry</li>
+                <li class="flex items-start gap-2"><span class="text-removed mt-0.5">✕</span> hardcoded credential detected on line 14</li>
+              </ul>
+            </div>
+          </div>
+          <p class="text-center text-xs font-mono text-ink2 mt-3">simulated example — replays automatically</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- Stat / problem section -->
+  <!-- ============================================================= -->
+  <section class="py-16 border-y border-line bg-surface/30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="grid lg:grid-cols-5 gap-10 items-center">
+        <div class="lg:col-span-2 reveal">
+          <p class="font-mono text-xs uppercase tracking-widest text-brand-bright mb-3">Why this exists now</p>
+          <h2 class="text-2xl sm:text-3xl font-display font-bold text-white mb-4 leading-snug">
+            AI assistants don't just write bugs. Sometimes they write dependencies that were never real.
+          </h2>
+          <p class="text-slate-400 leading-relaxed text-[15px]">
+            Researchers analyzing hundreds of thousands of AI-generated code samples found commercial models invent
+            nonexistent package names in roughly <strong class="text-white font-semibold">1 in 20</strong> suggestions —
+            and open-source models in as many as <strong class="text-white font-semibold">1 in 5</strong>. Register one of
+            those exact names on npm or PyPI and you get a working supply-chain attack, a technique now known as
+            <em class="text-slate-300 not-italic">slopsquatting</em>.
+          </p>
+        </div>
+        <div class="lg:col-span-3 grid grid-cols-2 sm:grid-cols-4 gap-4 reveal" style="transition-delay:.1s">
+          <div class="rounded-2xl border border-line bg-surface p-5">
+            <div class="font-display text-3xl sm:text-4xl font-bold text-white num-tick" data-count="5.2" data-suffix="%">0%</div>
+            <p class="text-xs text-ink2 mt-2 leading-snug font-mono">avg. hallucination rate, commercial models</p>
+          </div>
+          <div class="rounded-2xl border border-line bg-surface p-5">
+            <div class="font-display text-3xl sm:text-4xl font-bold text-white num-tick" data-count="21.7" data-suffix="%">0%</div>
+            <p class="text-xs text-ink2 mt-2 leading-snug font-mono">avg. hallucination rate, open-source models</p>
+          </div>
+          <div class="rounded-2xl border border-line bg-surface p-5">
+            <div class="font-display text-3xl sm:text-4xl font-bold text-white num-tick" data-count="2" data-suffix="">0</div>
+            <p class="text-xs text-ink2 mt-2 leading-snug font-mono">registries checked live — npm &amp; PyPI</p>
+          </div>
+          <div class="rounded-2xl border border-line bg-surface p-5">
+            <div class="font-display text-3xl sm:text-4xl font-bold text-white num-tick" data-count="0" data-suffix="B">0</div>
+            <p class="text-xs text-ink2 mt-2 leading-snug font-mono">bytes of your source code stored</p>
+          </div>
+        </div>
+      </div>
+      <p class="text-[11px] text-ink2 mt-6 font-mono">Source: Spracklen et al., "We Have a Package for You!" (USENIX Security), 576,000 generated code samples across 16 models.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- Features -->
+  <!-- ============================================================= -->
+  <section id="product" class="py-24">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="max-w-2xl mb-16 reveal">
+        <p class="font-mono text-xs uppercase tracking-widest text-brand-bright mb-3">What actually runs on every PR</p>
+        <h2 class="text-3xl sm:text-4xl font-display font-bold tracking-tight text-white mb-4">Six checks. Added lines only.</h2>
+        <p class="text-slate-400 text-[15px] leading-relaxed">Warden CI never re-scans code your PR didn't touch — only the lines actually added in the diff, so nothing pre-existing generates new noise.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <!-- 1 -->
+        <div class="reveal group relative bg-surface border border-line p-7 rounded-2xl hover:border-brand/40 transition-colors">
+          <div class="w-11 h-11 rounded-xl bg-removed/10 text-removed flex items-center justify-center text-lg mb-6 border border-removed/20">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </div>
+          <h3 class="text-lg font-display font-semibold text-white mb-2.5">Hallucinated package detection</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">Every added <code class="font-mono text-slate-300">import</code>/<code class="font-mono text-slate-300">require</code> is checked against the live npm and PyPI registries. If the package doesn't exist, it's flagged before anyone installs it.</p>
+        </div>
+        <!-- 2 -->
+        <div class="reveal group relative bg-surface border border-line p-7 rounded-2xl hover:border-brand/40 transition-colors" style="transition-delay:.05s">
+          <div class="w-11 h-11 rounded-xl bg-warn/10 text-warn flex items-center justify-center text-lg mb-6 border border-warn/20">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-8.99 3.75h.008v.008h-.008v-.008z"/></svg>
+          </div>
+          <h3 class="text-lg font-display font-semibold text-white mb-2.5">Typosquat &amp; freshness signal</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">Packages that exist but were published in the last 45 days and sit within a couple characters of a popular name get flagged as a likely typosquat, not waved through clean.</p>
+        </div>
+        <!-- 3 -->
+        <div class="reveal group relative bg-surface border border-line p-7 rounded-2xl hover:border-brand/40 transition-colors" style="transition-delay:.1s">
+          <div class="w-11 h-11 rounded-xl bg-brand/10 text-brand-bright flex items-center justify-center text-lg mb-6 border border-brand/20">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
+          </div>
+          <h3 class="text-lg font-display font-semibold text-white mb-2.5">Hardcoded secret detection</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">Flags API keys, tokens, and credentials that show up in newly added lines, before they land in a commit history that's painful to scrub.</p>
+        </div>
+        <!-- 4 -->
+        <div class="reveal group relative bg-surface border border-line p-7 rounded-2xl hover:border-brand/40 transition-colors">
+          <div class="w-11 h-11 rounded-xl bg-removed/10 text-removed flex items-center justify-center text-lg mb-6 border border-removed/20">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+          </div>
+          <h3 class="text-lg font-display font-semibold text-white mb-2.5">Dangerous execution patterns</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">Catches <code class="font-mono text-slate-300">eval()</code>, <code class="font-mono text-slate-300">new Function()</code>, and unguarded shell execution added in a PR — common in scaffolded or unreviewed AI output.</p>
+        </div>
+        <!-- 5 -->
+        <div class="reveal group relative bg-surface border border-line p-7 rounded-2xl hover:border-brand/40 transition-colors" style="transition-delay:.05s">
+          <div class="w-11 h-11 rounded-xl bg-added/10 text-added flex items-center justify-center text-lg mb-6 border border-added/20">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 3v12m0 0a3 3 0 106 0m-6 0a3 3 0 116 0m6-12v3m0 0a3 3 0 106 0m-6 0a3 3 0 116 0m-6 3v6a3 3 0 003 3h3"/></svg>
+          </div>
+          <h3 class="text-lg font-display font-semibold text-white mb-2.5">Diff-only scanning</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">Only lines actually added in the pull request are analyzed — never the rest of the file — so untouched legacy code never generates a false alarm.</p>
+        </div>
+        <!-- 6 -->
+        <div class="reveal group relative bg-surface border border-line p-7 rounded-2xl hover:border-brand/40 transition-colors" style="transition-delay:.1s">
+          <div class="w-11 h-11 rounded-xl bg-brand/10 text-brand-bright flex items-center justify-center text-lg mb-6 border border-brand/20">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
+          </div>
+          <h3 class="text-lg font-display font-semibold text-white mb-2.5">Zero source persistence</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">Diffs are parsed in memory to run these checks, then discarded. No source code is written to a database — see the Security section below.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- How it works -->
+  <!-- ============================================================= -->
+  <section id="how-it-works" class="py-24 border-t border-line bg-surface/30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="max-w-2xl mb-16 reveal">
+        <p class="font-mono text-xs uppercase tracking-widest text-brand-bright mb-3">How it works</p>
+        <h2 class="text-3xl sm:text-4xl font-display font-bold tracking-tight text-white">Three steps, no YAML.</h2>
+      </div>
+      <div class="grid md:grid-cols-3 gap-8 relative">
+        <div class="hidden md:block absolute top-7 left-[16.5%] right-[16.5%] h-px bg-gradient-to-r from-brand/40 via-line to-transparent"></div>
+        <div class="reveal relative">
+          <div class="w-14 h-14 rounded-2xl bg-surface border border-line flex items-center justify-center font-display font-bold text-brand-bright text-lg mb-6 relative z-10">01</div>
+          <h3 class="text-lg font-display font-semibold text-white mb-2.5">Install the GitHub App</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">Add Warden CI to an organization or a single repository from the GitHub Marketplace. No config file, no YAML to write or maintain.</p>
+        </div>
+        <div class="reveal relative" style="transition-delay:.1s">
+          <div class="w-14 h-14 rounded-2xl bg-surface border border-line flex items-center justify-center font-display font-bold text-brand-bright text-lg mb-6 relative z-10">02</div>
+          <h3 class="text-lg font-display font-semibold text-white mb-2.5">Open or update a pull request</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">The moment a PR is opened, reopened, or pushed to, Warden verifies GitHub's webhook signature and reads only the lines that changed.</p>
+        </div>
+        <div class="reveal relative" style="transition-delay:.2s">
+          <div class="w-14 h-14 rounded-2xl bg-surface border border-line flex items-center justify-center font-display font-bold text-brand-bright text-lg mb-6 relative z-10">03</div>
+          <h3 class="text-lg font-display font-semibold text-white mb-2.5">Findings post as a Check Run</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">Results appear directly on the pull request, in the same place as your other CI checks. Non-blocking by default — you decide what to do with them.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- Security -->
+  <!-- ============================================================= -->
+  <section id="security" class="py-24">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="grid lg:grid-cols-2 gap-14 items-center">
+        <div class="reveal">
+          <p class="font-mono text-xs uppercase tracking-widest text-brand-bright mb-3">Security &amp; privacy</p>
+          <h2 class="text-3xl font-display font-bold tracking-tight text-white mb-6">Nothing to leak, because nothing is kept.</h2>
+          <p class="text-slate-400 mb-8 leading-relaxed text-[15px]">
+            Your code is your company's most sensitive asset. Warden CI parses pull request diffs in memory purely
+            to run its checks, and discards them immediately after — there's no source-code database to breach.
+          </p>
+          <ul class="space-y-4 text-slate-300 text-sm">
+            <li class="flex items-start gap-3">
+              <span class="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-added/15 text-added flex items-center justify-center"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.4 7.4a1 1 0 01-1.4 0L3.3 9.5a1 1 0 111.4-1.4l3.9 3.9 6.7-6.7a1 1 0 011.4 0z" clip-rule="evenodd"/></svg></span>
+              No repository source code is written to disk or a database.
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-added/15 text-added flex items-center justify-center"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.4 7.4a1 1 0 01-1.4 0L3.3 9.5a1 1 0 111.4-1.4l3.9 3.9 6.7-6.7a1 1 0 011.4 0z" clip-rule="evenodd"/></svg></span>
+              Every webhook is verified with GitHub's HMAC-SHA256 signature before it's processed.
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-added/15 text-added flex items-center justify-center"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.4 7.4a1 1 0 01-1.4 0L3.3 9.5a1 1 0 111.4-1.4l3.9 3.9 6.7-6.7a1 1 0 011.4 0z" clip-rule="evenodd"/></svg></span>
+              GitHub App installation tokens are minted per repo and scoped only to the PR being checked.
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-added/15 text-added flex items-center justify-center"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.4 7.4a1 1 0 01-1.4 0L3.3 9.5a1 1 0 111.4-1.4l3.9 3.9 6.7-6.7a1 1 0 011.4 0z" clip-rule="evenodd"/></svg></span>
+              Only package names — never file contents — are sent to npm and PyPI to check existence.
+            </li>
+          </ul>
+          <a href="/privacy" class="inline-flex items-center gap-1.5 text-brand-bright hover:text-white text-sm font-medium mt-7 transition group">
+            Read the full privacy policy
+            <svg class="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
+          </a>
+        </div>
+        <div class="reveal bg-surface border border-line rounded-2xl shadow-2xl shadow-black/30 overflow-hidden" style="transition-delay:.1s">
+          <div class="flex items-center gap-2 px-4 py-3 border-b border-line bg-surface2/60">
+            <span class="w-3 h-3 rounded-full bg-[#f85149]/70"></span>
+            <span class="w-3 h-3 rounded-full bg-[#d29922]/70"></span>
+            <span class="w-3 h-3 rounded-full bg-[#3fb950]/70"></span>
+            <span class="ml-3 font-mono text-xs text-ink2">webhook response — live</span>
+          </div>
+          <div class="p-5 space-y-3 font-mono text-[13px] leading-6">
+            <p class="text-ink2">// warden-ci · POST /api/github/webhooks</p>
+            <p><span class="text-added">✓ SUCCESS</span> <span class="text-slate-300">payload validated via HMAC-SHA256</span></p>
+            <p><span class="text-added">✓ MEMORY</span>  <span class="text-slate-300">diff parsed in-memory, 0 bytes persisted</span></p>
+            <p><span class="text-added">✓ AUDIT</span>   <span class="text-slate-300">2 flagged imports · 1 hardcoded secret</span></p>
+            <p><span class="text-ink2">✓ CHECK</span>   <span class="text-slate-300">posted to pull_request #482</span></p>
+            <p class="pt-2 text-slate-500">warden@ci ~ <span class="term-cursor"></span></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- Roadmap -->
+  <!-- ============================================================= -->
+  <section class="py-24 border-t border-line bg-surface/30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="max-w-2xl mb-14 reveal">
+        <p class="font-mono text-xs uppercase tracking-widest text-brand-bright mb-3">What's next</p>
+        <h2 class="text-3xl sm:text-4xl font-display font-bold tracking-tight text-white mb-4">Built in the open about what isn't done yet.</h2>
+        <p class="text-slate-400 text-[15px] leading-relaxed">The checks above are live today. These are genuinely in progress — no marketing gloss.</p>
+      </div>
+      <div class="grid md:grid-cols-3 gap-5">
+        <div class="reveal bg-surface border border-line rounded-2xl p-6">
+          <span class="inline-block font-mono text-[11px] px-2.5 py-1 rounded-full bg-warn/10 text-warn border border-warn/25 mb-4">in development</span>
+          <h3 class="text-base font-display font-semibold text-white mb-2">VS Code extension</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">Catch a hallucinated npm import the moment you accept an AI suggestion — before it's ever committed, not after.</p>
+        </div>
+        <div class="reveal bg-surface border border-line rounded-2xl p-6" style="transition-delay:.05s">
+          <span class="inline-block font-mono text-[11px] px-2.5 py-1 rounded-full bg-brand/10 text-brand-bright border border-brand/25 mb-4">planned</span>
+          <h3 class="text-base font-display font-semibold text-white mb-2">crates.io &amp; RubyGems</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">Same detection engine, more ecosystems. npm and PyPI are built behind a shared adapter interface designed for this.</p>
+        </div>
+        <div class="reveal bg-surface border border-line rounded-2xl p-6" style="transition-delay:.1s">
+          <span class="inline-block font-mono text-[11px] px-2.5 py-1 rounded-full bg-brand/10 text-brand-bright border border-brand/25 mb-4">planned</span>
+          <h3 class="text-base font-display font-semibold text-white mb-2">Live popularity data</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">Replacing the static popular-package seed list with a scheduled feed of real npm/PyPI download counts.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- Pricing -->
+  <!-- ============================================================= -->
+  <section id="pricing" class="py-24">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center max-w-2xl mx-auto mb-16 reveal">
+        <p class="font-mono text-xs uppercase tracking-widest text-brand-bright mb-3">Pricing</p>
+        <h2 class="text-3xl sm:text-4xl font-display font-bold tracking-tight text-white mb-4">Simple, on purpose.</h2>
+        <p class="text-slate-400 text-[15px]">Two plans. Install free on GitHub Marketplace, upgrade any time via secure Paddle billing.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">
+        <!-- Free -->
+        <div class="reveal bg-surface border border-line p-8 rounded-2xl flex flex-col">
+          <h3 class="text-lg font-display font-bold text-white mb-1.5">Free</h3>
+          <p class="text-slate-400 text-sm mb-6">For open-source projects and public repos.</p>
+          <div class="text-4xl font-display font-bold text-white mb-7">$0 <span class="text-sm font-normal text-ink2 font-mono">/ forever</span></div>
+          <ul class="space-y-3 text-sm text-slate-300 mb-8 flex-1">
+            <li class="flex items-start gap-2.5"><svg class="w-4 h-4 text-added mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.4 7.4a1 1 0 01-1.4 0L3.3 9.5a1 1 0 111.4-1.4l3.9 3.9 6.7-6.7a1 1 0 011.4 0z" clip-rule="evenodd"/></svg>Unlimited public repository scans</li>
+            <li class="flex items-start gap-2.5"><svg class="w-4 h-4 text-added mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.4 7.4a1 1 0 01-1.4 0L3.3 9.5a1 1 0 111.4-1.4l3.9 3.9 6.7-6.7a1 1 0 011.4 0z" clip-rule="evenodd"/></svg>Hallucinated package detection (npm + PyPI)</li>
+            <li class="flex items-start gap-2.5"><svg class="w-4 h-4 text-added mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.4 7.4a1 1 0 01-1.4 0L3.3 9.5a1 1 0 111.4-1.4l3.9 3.9 6.7-6.7a1 1 0 011.4 0z" clip-rule="evenodd"/></svg>Secret &amp; dangerous-exec detection</li>
+            <li class="flex items-start gap-2.5"><svg class="w-4 h-4 text-added mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.4 7.4a1 1 0 01-1.4 0L3.3 9.5a1 1 0 111.4-1.4l3.9 3.9 6.7-6.7a1 1 0 011.4 0z" clip-rule="evenodd"/></svg>Results posted as a GitHub Check Run</li>
+          </ul>
+          <a href="https://github.com/marketplace/warden-ci" target="_blank" rel="noopener" class="w-full bg-surface2 hover:bg-white/10 text-white font-semibold py-3 rounded-xl text-center text-sm transition border border-line">Install Free</a>
+        </div>
+
+        <!-- Pro -->
+        <div class="reveal glow-border relative bg-surface2 border border-brand/40 p-8 rounded-2xl flex flex-col shadow-xl shadow-brand/10" style="transition-delay:.08s">
+          <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-brand text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider font-mono">Most popular</div>
+          <h3 class="text-lg font-display font-bold text-white mb-1.5">Pro</h3>
+          <p class="text-slate-400 text-sm mb-6">Everything in Free, plus private repos.</p>
+          <div class="text-4xl font-display font-bold text-white mb-1">$19 <span class="text-sm font-normal text-ink2 font-mono">/ month</span></div>
+          <p class="text-xs text-ink2 mb-6 font-mono">flat rate, per GitHub account or org · 14-day free trial</p>
+          <ul class="space-y-3 text-sm text-slate-300 mb-8 flex-1">
+            <li class="flex items-start gap-2.5"><svg class="w-4 h-4 text-added mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.4 7.4a1 1 0 01-1.4 0L3.3 9.5a1 1 0 111.4-1.4l3.9 3.9 6.7-6.7a1 1 0 011.4 0z" clip-rule="evenodd"/></svg>Everything in Free</li>
+            <li class="flex items-start gap-2.5"><svg class="w-4 h-4 text-added mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.4 7.4a1 1 0 01-1.4 0L3.3 9.5a1 1 0 111.4-1.4l3.9 3.9 6.7-6.7a1 1 0 011.4 0z" clip-rule="evenodd"/></svg>Private repository scanning</li>
+            <li class="flex items-start gap-2.5"><svg class="w-4 h-4 text-added mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.4 7.4a1 1 0 01-1.4 0L3.3 9.5a1 1 0 111.4-1.4l3.9 3.9 6.7-6.7a1 1 0 011.4 0z" clip-rule="evenodd"/></svg>Cancel any time, prorated to period end</li>
+          </ul>
+          <a href="/subscribe?plan=pro" class="w-full btn-primary text-white font-semibold py-3 rounded-xl text-center text-sm transition">Upgrade to Pro</a>
+        </div>
+      </div>
+
+      <p class="text-center text-sm text-ink2 mt-8">
+        Running Warden across several orgs, or need an invoice? Team and Enterprise billing is available —
+        <a href="mailto:support@wardenci.dev" class="text-brand-bright hover:text-white transition">contact us</a> and we'll set it up.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- FAQ -->
+  <!-- ============================================================= -->
+  <section id="faq" class="py-24 border-t border-line bg-surface/30">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-14 reveal">
+        <p class="font-mono text-xs uppercase tracking-widest text-brand-bright mb-3">FAQ</p>
+        <h2 class="text-3xl sm:text-4xl font-display font-bold tracking-tight text-white">Questions, answered plainly.</h2>
+      </div>
+
+      <div class="space-y-3">
+        <details class="reveal group bg-surface border border-line rounded-xl px-6 py-1 open:border-brand/30 transition-colors">
+          <summary class="flex items-center justify-between gap-4 py-4 font-display font-semibold text-white text-[15px]">
+            What is a "hallucinated package"?
+            <svg class="faq-chevron w-4 h-4 text-brand-bright flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+          </summary>
+          <p class="text-slate-400 text-sm leading-relaxed pb-5">When an AI coding tool invents a plausible-looking package name that doesn't actually exist. If an attacker registers that exact name later — a technique called slopsquatting — anyone who installs it runs whatever code the attacker put there.</p>
+        </details>
+        <details class="reveal group bg-surface border border-line rounded-xl px-6 py-1 open:border-brand/30 transition-colors" style="transition-delay:.03s">
+          <summary class="flex items-center justify-between gap-4 py-4 font-display font-semibold text-white text-[15px]">
+            Does Warden CI read or store my source code?
+            <svg class="faq-chevron w-4 h-4 text-brand-bright flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+          </summary>
+          <p class="text-slate-400 text-sm leading-relaxed pb-5">It reads the diff of a pull request in memory to run its checks, then discards it. No source code is written to disk or a database. Full detail in the <a href="/privacy" class="text-brand-bright hover:text-white transition">privacy policy</a>.</p>
+        </details>
+        <details class="reveal group bg-surface border border-line rounded-xl px-6 py-1 open:border-brand/30 transition-colors" style="transition-delay:.06s">
+          <summary class="flex items-center justify-between gap-4 py-4 font-display font-semibold text-white text-[15px]">
+            Which package ecosystems are supported?
+            <svg class="faq-chevron w-4 h-4 text-brand-bright flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+          </summary>
+          <p class="text-slate-400 text-sm leading-relaxed pb-5">npm (JavaScript/TypeScript) and PyPI (Python) today. Each ecosystem is a self-contained adapter, so more registries are on the roadmap without touching the core detection logic.</p>
+        </details>
+        <details class="reveal group bg-surface border border-line rounded-xl px-6 py-1 open:border-brand/30 transition-colors" style="transition-delay:.09s">
+          <summary class="flex items-center justify-between gap-4 py-4 font-display font-semibold text-white text-[15px]">
+            Will Warden CI block my pull requests?
+            <svg class="faq-chevron w-4 h-4 text-brand-bright flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+          </summary>
+          <p class="text-slate-400 text-sm leading-relaxed pb-5">No. By default, findings post as a non-blocking GitHub Check alongside your other CI status checks — merges are never blocked automatically.</p>
+        </details>
+        <details class="reveal group bg-surface border border-line rounded-xl px-6 py-1 open:border-brand/30 transition-colors" style="transition-delay:.12s">
+          <summary class="flex items-center justify-between gap-4 py-4 font-display font-semibold text-white text-[15px]">
+            What's included in the Free plan?
+            <svg class="faq-chevron w-4 h-4 text-brand-bright flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+          </summary>
+          <p class="text-slate-400 text-sm leading-relaxed pb-5">Unlimited automated scanning of public repositories, at no cost, indefinitely. Private repositories require the Pro plan.</p>
+        </details>
+        <details class="reveal group bg-surface border border-line rounded-xl px-6 py-1 open:border-brand/30 transition-colors" style="transition-delay:.15s">
+          <summary class="flex items-center justify-between gap-4 py-4 font-display font-semibold text-white text-[15px]">
+            What actually triggers a scan?
+            <svg class="faq-chevron w-4 h-4 text-brand-bright flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+          </summary>
+          <p class="text-slate-400 text-sm leading-relaxed pb-5">The GitHub <code class="font-mono text-slate-300">pull_request</code> webhook events <code class="font-mono text-slate-300">opened</code>, <code class="font-mono text-slate-300">synchronize</code> (new commits pushed), and <code class="font-mono text-slate-300">reopened</code>. Each run re-checks only the lines added since the last scan.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- Final CTA -->
+  <!-- ============================================================= -->
+  <section class="py-24">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="reveal relative rounded-3xl border border-line bg-gradient-to-br from-surface via-surface to-surface2 px-8 py-16 sm:px-16 text-center overflow-hidden">
+        <div class="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(124,108,255,0.15),transparent_60%)] pointer-events-none"></div>
+        <div class="relative">
+          <h2 class="text-3xl sm:text-4xl font-display font-bold tracking-tight text-white mb-4">Stop merging packages that don't exist.</h2>
+          <p class="text-slate-400 max-w-xl mx-auto mb-9 text-[15px]">Install takes about two minutes. The first scan runs on your very next pull request.</p>
+          <a href="https://github.com/marketplace/warden-ci" target="_blank" rel="noopener" class="inline-flex btn-primary text-white font-semibold px-8 py-3.5 rounded-xl transition items-center gap-2.5 text-[15px]">
+            <svg viewBox="0 0 16 16" class="w-[18px] h-[18px] fill-current"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+            Install on GitHub — Free
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ============================================================= -->
+<!-- Footer -->
+<!-- ============================================================= -->
+<footer class="border-t border-line py-14">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex flex-col md:flex-row justify-between gap-10 mb-10">
+      <div class="max-w-xs">
+        <a href="#main" class="flex items-center gap-2.5 mb-4">
+          <img src="/assets/warden-ci-logo.svg" alt="" class="w-7 h-7" width="28" height="28">
+          <span class="text-base font-display font-bold text-white">Warden <span class="text-brand-bright">CI</span></span>
+        </a>
+        <p class="text-slate-500 text-sm leading-relaxed">Pull request security for the age of AI-written code. A product of Focus Switch.</p>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-10 text-sm">
+        <div>
+          <p class="font-mono text-xs uppercase tracking-widest text-ink2 mb-4">Product</p>
+          <ul class="space-y-2.5 text-slate-400">
+            <li><a href="#product" class="hover:text-white transition">Features</a></li>
+            <li><a href="#how-it-works" class="hover:text-white transition">How it works</a></li>
+            <li><a href="#security" class="hover:text-white transition">Security</a></li>
+            <li><a href="#pricing" class="hover:text-white transition">Pricing</a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="font-mono text-xs uppercase tracking-widest text-ink2 mb-4">Resources</p>
+          <ul class="space-y-2.5 text-slate-400">
+            <li><a href="#faq" class="hover:text-white transition">FAQ</a></li>
+            <li><a href="https://github.com/marketplace/warden-ci" target="_blank" rel="noopener" class="hover:text-white transition">GitHub Marketplace</a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="font-mono text-xs uppercase tracking-widest text-ink2 mb-4">Legal</p>
+          <ul class="space-y-2.5 text-slate-400">
+            <li><a href="/privacy" class="hover:text-white transition">Privacy Policy</a></li>
+            <li><a href="/terms" class="hover:text-white transition">Terms of Service</a></li>
+            <li><a href="/refund" class="hover:text-white transition">Refund Policy</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="pt-8 border-t border-line flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-ink2">
+      <span>&copy; 2026 Warden CI. All rights reserved. A product of Focus Switch.</span>
+      <span class="font-mono">built for pull requests, not press releases</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Header background fade on scroll
+  var header = document.getElementById('header-bg');
+  window.addEventListener('scroll', function () {
+    if (!header) return;
+    header.style.opacity = window.scrollY > 12 ? '1' : '0.85';
+  });
+
+  // Mobile menu
+  var btn = document.getElementById('mobile-menu-btn');
+  var menu = document.getElementById('mobile-menu');
+  var iconOpen = document.getElementById('icon-open');
+  var iconClose = document.getElementById('icon-close');
+  if (btn) {
+    btn.addEventListener('click', function () {
+      var isHidden = menu.classList.contains('hidden');
+      menu.classList.toggle('hidden');
+      iconOpen.classList.toggle('hidden');
+      iconClose.classList.toggle('hidden');
+      btn.setAttribute('aria-expanded', String(isHidden));
+    });
+    menu.querySelectorAll('a').forEach(function (a) {
+      a.addEventListener('click', function () {
+        menu.classList.add('hidden');
+        iconOpen.classList.remove('hidden');
+        iconClose.classList.add('hidden');
+      });
+    });
+  }
+
+  // Scroll reveal
+  var revealEls = document.querySelectorAll('.reveal');
+  if ('IntersectionObserver' in window && !reduceMotion) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible');
+          io.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+    revealEls.forEach(function (el) { io.observe(el); });
+  } else {
+    revealEls.forEach(function (el) { el.classList.add('is-visible'); });
+  }
+
+  // Ambient cursor spotlight (hero only, fine pointers only)
+  var hero = document.getElementById('hero');
+  if (hero && window.matchMedia('(pointer: fine)').matches && !reduceMotion) {
+    hero.addEventListener('mousemove', function (e) {
+      var rect = hero.getBoundingClientRect();
+      hero.style.setProperty('--x', ((e.clientX - rect.left) / rect.width * 100) + '%');
+      hero.style.setProperty('--y', ((e.clientY - rect.top) / rect.height * 100) + '%');
+    });
+  }
+
+  // Animated stat counters
+  var counters = document.querySelectorAll('.num-tick');
+  function animateCounter(el) {
+    var target = parseFloat(el.getAttribute('data-count'));
+    var suffix = el.getAttribute('data-suffix') || '';
+    var isDecimal = String(target).indexOf('.') !== -1;
+    var start = 0;
+    var duration = 1100;
+    var startTime = null;
+    function step(ts) {
+      if (!startTime) startTime = ts;
+      var progress = Math.min((ts - startTime) / duration, 1);
+      var eased = 1 - Math.pow(1 - progress, 3);
+      var value = start + (target - start) * eased;
+      el.textContent = (isDecimal ? value.toFixed(1) : Math.round(value)) + suffix;
+      if (progress < 1) requestAnimationFrame(step);
+    }
+    if (reduceMotion) {
+      el.textContent = (isDecimal ? target.toFixed(1) : target) + suffix;
+    } else {
+      requestAnimationFrame(step);
+    }
+  }
+  if ('IntersectionObserver' in window && counters.length) {
+    var cio = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          animateCounter(entry.target);
+          cio.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.5 });
+    counters.forEach(function (c) { cio.observe(c); });
+  }
+
+  // Hero diff/terminal demo — loops through a simulated PR scan
+  var diffPanel = document.getElementById('diff-panel');
+  var checkCard = document.getElementById('check-card');
+  var checkStatus = document.getElementById('check-status');
+
+  var diffLines = [
+    { text: "  function loadResults(page) {", cls: "text-slate-500" },
+    { text: "+ import { paginate } from \"react-fast-paginate\";", cls: "text-added", flag: "package not found on npm registry" },
+    { text: "+ import requests", cls: "text-added" },
+    { text: "+ const STRIPE_KEY = \"sk_live_51H9x7KgQ2mN...\";", cls: "text-added", flag: "hardcoded credential on this line" },
+    { text: "+ eval(userSuppliedFilter);", cls: "text-added", flag: "unguarded eval() on user input" },
+    { text: "    return requests.get(`/api/items?p=${page}`);", cls: "text-slate-500" },
+    { text: "  }", cls: "text-slate-500" },
+  ];
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function buildPanel() {
+    diffPanel.innerHTML = '';
+    diffLines.forEach(function (line, i) {
+      var row = document.createElement('div');
+      row.className = 'diff-line ' + line.cls;
+      row.textContent = line.text;
+      row.style.transitionDelay = (i * 0.12) + 's';
+      diffPanel.appendChild(row);
+      if (line.flag) {
+        var badge = document.createElement('div');
+        badge.className = 'badge-pop inline-flex items-center gap-1.5 mt-0.5 mb-1 ml-4 text-[11px] px-2 py-0.5 rounded-md bg-removed/10 text-removed border border-removed/25';
+        badge.textContent = '⚠ ' + line.flag;
+        badge.style.transitionDelay = (i * 0.12 + 0.55) + 's';
+        diffPanel.appendChild(badge);
+        line._badgeEl = badge;
+      }
+      line._rowEl = row;
+    });
+  }
+
+  function playDemo() {
+    buildPanel();
+    checkCard.classList.remove('shown');
+    var rows = diffPanel.querySelectorAll('.diff-line');
+    var badges = diffPanel.querySelectorAll('.badge-pop');
+    requestAnimationFrame(function () {
+      rows.forEach(function (r) { r.classList.add('shown'); });
+      badges.forEach(function (b) { b.classList.add('shown'); });
+    });
+    var totalDelay = (diffLines.length * 0.12 + 0.9) * 1000;
+    setTimeout(function () {
+      checkCard.classList.add('shown');
+    }, totalDelay);
+    return totalDelay + 3600; // hold before replay
+  }
+
+  function loop() {
+    if (reduceMotion) {
+      buildPanel();
+      diffPanel.querySelectorAll('.diff-line, .badge-pop').forEach(function (el) { el.classList.add('shown'); });
+      checkCard.classList.add('shown');
+      return;
+    }
+    var wait = playDemo();
+    setTimeout(loop, wait);
+  }
+  if (diffPanel) loop();
+})();
+</script>
+
+</body>
+</html>
