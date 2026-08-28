@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://wardenci.dev/sitemap.xml
+Sitemap: https://warden-ci-dvk5.onrender.com/sitemap.xml
