@@ -176,7 +176,7 @@ whether it's time to move to a paid instance.
 
 The scan API supports `?format=sarif` for GitHub code-scanning-compatible results and `?format=cyclonedx` for dependency inventory exchange. Copy `warden-policy.example.json` to `warden-policy.json` and review it in code review; policy history and suppressions are persisted in Neon so exceptions are attributable and can expire.
 
-Telemetry settings use the same documented installation-repositories API and require at least one repository with read access in the requested installation. Run reports apply the stricter exact-repository check. The OAuth flow requests no broad organization scope; the GitHub App installation and repository permissions are the source of truth.
+Telemetry settings are installation-wide mutations, not repository-scoped report reads. GitHub's documented OAuth repository-listing API proves access to specific repositories but does not prove installation-wide administrative authority or organization ownership. Warden therefore fails closed for telemetry-settings access rather than granting every repository reader installation-wide control. Run reports continue to use the exact-repository `permissions.pull` check. The OAuth flow requests no broad organization scope.
 
 The repository also includes `.github/workflows/warden-scan.yml` as a reference GitHub Action. It fails closed when the API reports blocking findings and requires `WARDEN_URL` plus `WARDEN_API_TOKEN` repository secrets.
 

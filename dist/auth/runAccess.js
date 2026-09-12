@@ -3,7 +3,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.REQUIRED_REPOSITORY_PERMISSION = void 0;
 exports.isUuid = isUuid;
 exports.authorizeInstallationRepository = authorizeInstallationRepository;
-exports.authorizeInstallationAccess = authorizeInstallationAccess;
 exports.authorizeRunAccessWithDependencies = authorizeRunAccessWithDependencies;
 exports.authorizeRunAccess = authorizeRunAccess;
 const drizzle_orm_1 = require("drizzle-orm");
@@ -44,12 +43,6 @@ async function authorizeInstallationRepository(token, installationId, repository
         return "forbidden";
     const repositories = await accessibleRepositories(installationId, token, githubFetch);
     return repositories.some((repository) => repository.id === repositoryId && repository.permissions?.[exports.REQUIRED_REPOSITORY_PERMISSION] === true) ? "authorized" : "forbidden";
-}
-async function authorizeInstallationAccess(token, installationId, githubFetch) {
-    if (!Number.isSafeInteger(installationId) || installationId <= 0)
-        return false;
-    const repositories = await accessibleRepositories(installationId, token, githubFetch);
-    return repositories.some((repository) => repository.permissions?.[exports.REQUIRED_REPOSITORY_PERMISSION] === true);
 }
 async function authorizeRunAccessWithDependencies(req, runId, dependencies) {
     const sessionId = sessionIdFromRequest(req);

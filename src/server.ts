@@ -12,7 +12,7 @@ import { handlePullRequestWebhook } from "./github/webhookHandler";
 import { getRedisClient } from "./lib/redis";
 import { schedulePopularPackageRefresh } from "./scan/popularPackageRefresh";
 import { setInstallationCorpusOptOut, setPrivateCorpusOptIn } from "./telemetry/corpusLog";
-import { authorizeInstallationAccess, authorizeRunAccess, isUuid } from "./auth/runAccess";
+import { authorizeRunAccess, isUuid } from "./auth/runAccess";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -40,13 +40,11 @@ async function dashboardInstallation(req: Request, installationId: number): Prom
   if (!sessionId) return null;
   const token = await getRedisClient().get<string>(`warden:oauth:session:${sessionId}`);
   if (!token) return null;
-  try {
-    return await authorizeInstallationAccess(token, installationId, fetch);
-  } catch (error) {
-    if ((error as { status?: number }).status === 401) return null;
-    if ((error as { status?: number }).status === 403 || (error as { status?: number }).status === 404) return false;
-    throw error;
-  }
+  // The settings mutate installation-wide telemetry behavior. GitHub's OAuth
+  // repository listing proves repository read access, not installation-wide
+  // administrative authority, so do not grant broader access on that basis.
+  // This remains fail-closed until a documented stronger proof is available.
+  return false;
 }
 
 // Fail loud at boot, not silently on the first user's request — if this prints on

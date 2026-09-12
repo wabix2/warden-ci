@@ -55,12 +55,6 @@ export async function authorizeInstallationRepository(token: string, installatio
   return repositories.some((repository) => repository.id === repositoryId && repository.permissions?.[REQUIRED_REPOSITORY_PERMISSION] === true) ? "authorized" : "forbidden";
 }
 
-export async function authorizeInstallationAccess(token: string, installationId: number, githubFetch: typeof fetch): Promise<boolean> {
-  if (!Number.isSafeInteger(installationId) || installationId <= 0) return false;
-  const repositories = await accessibleRepositories(installationId, token, githubFetch);
-  return repositories.some((repository) => repository.permissions?.[REQUIRED_REPOSITORY_PERMISSION] === true);
-}
-
 export async function authorizeRunAccessWithDependencies(req: Request, runId: string, dependencies: AuthorizationDependencies): Promise<RunAccessResult> {
   const sessionId = sessionIdFromRequest(req);
   if (!sessionId) return { kind: "unauthenticated" };

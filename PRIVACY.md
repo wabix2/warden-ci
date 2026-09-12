@@ -40,11 +40,13 @@ retained for 365 days, after which Redis expires them.
 Private-repository scans are excluded by default. A customer may explicitly opt
 in a GitHub installation through the dashboard: click "Connect GitHub", authorize
 Warden, enter an installation ID visible in the GitHub App installation URL, and
-use the public/private controls. The API verifies that GitHub authorizes the signed-in account for that specific
-installation before changing settings; public installations may opt out and
-private installations may opt in. GitHub's OAuth API does not expose a universal
-installation-owner assertion to this app, so this is not represented as proof of
-organization ownership. Telemetry failures never fail or alter a scan.
+use the public/private controls. These controls mutate installation-wide
+telemetry behavior. GitHub's OAuth repository-listing API proves access to
+specific repositories, but does not expose installation-wide administrative
+authority or a universal installation-owner assertion to this app. Warden
+therefore fails closed for these settings until a documented stronger proof is
+available; repository readers are not treated as installation administrators.
+Telemetry failures never fail or alter a scan.
 
 The corpus never stores source code, diff content, file paths, repository names,
 organization or user logins, GitHub installation IDs, billing identifiers, or
