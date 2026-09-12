@@ -143,6 +143,23 @@ webhook deliveries to your local machine while developing.
 Standard Node app — `npm run build && npm start`. Works on Render, Fly.io,
 Railway, or anywhere else that runs Node 18+.
 
+### Run ownership migration
+
+For an existing database, deploy `migrations/0002_installation_scoped_reports.sql`
+first. Then run `pnpm db:ownership:report` with the production
+`DATABASE_URL`. This is a read-only, fail-closed report: it confirms ownership
+only through the authoritative `scan_run.repository_id -> repository.id ->
+installation.id` chain and never infers ownership from names, current webhooks,
+or user input.
+
+Do not run the apply command until the report has zero unresolved runs and zero
+integrity errors. Then run `pnpm db:ownership:apply`, which applies the two
+foreign keys transactionally and is safe to rerun. Verify the report again,
+then deploy the application and test one authorized report request plus one
+cross-installation denial. No historical ownership is guessed or silently
+rewritten; unresolved rows remain inaccessible to reports and require manual
+review using authoritative records.
+
 **Free-tier note**: Render's free tier spins down after ~15 minutes of
 inactivity and restarts on the next request. Billing state now survives this
 correctly (see `billing/store.ts`, backed by Upstash Redis — this replaced an
