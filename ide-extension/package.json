@@ -4,8 +4,12 @@
   "description": "Flags hallucinated/typosquat npm and PyPI package names as you type, before you commit them — the same detection Warden CI runs on pull requests, moved upstream to where the code is written.",
   "version": "0.1.0",
   "publisher": "REPLACE_ME",
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["Linters"],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters"
+  ],
   "activationEvents": [
     "onLanguage:javascript",
     "onLanguage:typescript",
@@ -14,14 +18,31 @@
     "onLanguage:python"
   ],
   "main": "./out/extension.js",
-  "contributes": {},
+  "contributes": {
+    "commands": [
+      {
+        "command": "wardenCheck.scanActiveFile",
+        "title": "Warden: Scan Active File"
+      }
+    ],
+    "configuration": {
+      "title": "Warden Check",
+      "properties": {
+        "wardenCheck.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Scan supported files for suspicious package imports."
+        }
+      }
+    }
+  },
   "scripts": {
     "compile": "tsc -p .",
     "watch": "tsc -w -p ."
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
-    "@types/node": "^20.12.7",
-    "typescript": "^5.4.5"
+    "@types/node": "^20.19.43",
+    "@types/vscode": "^1.137.0",
+    "typescript": "^5.7.3"
   }
 }

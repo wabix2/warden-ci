@@ -44,6 +44,9 @@ export async function setProStatus(record: ProRecord): Promise<void> {
   if (record.gumroadSaleId) {
     await redis.set(saleKey(record.gumroadSaleId), record.owner);
   }
+  if (record.gumroadSubscriptionId) {
+    await redis.set(`warden:subscription:${record.gumroadSubscriptionId}`, record.owner);
+  }
 }
 
 export async function getOwnerForSale(saleId: string): Promise<string | null> {
@@ -61,7 +64,9 @@ export async function getProRecord(owner: string): Promise<ProRecord | null> {
 export async function isProActive(owner: string): Promise<boolean> {
   const record = await getProRecord(owner);
   if (!record) return false;
-  return record.status === "active" || record.status === "trialing";
+  if (record.status !== "active" && record.status !== "trialing") return false;
+  if (record.updatedAt && Date.now() - Date.parse(record.updatedAt) > 1000 * 60 * 60 * 24 * 45) return false;
+  return record.plan === "pro" || record.plan === "team" || record.plan === "enterprise";
 }
 
 // --- Waitlist (used while GUMROAD_CHECKOUT_ENABLED=false, e.g. during product setup) ---

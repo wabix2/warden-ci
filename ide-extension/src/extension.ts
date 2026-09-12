@@ -1,24 +1,8 @@
 /**
  * Warden Check — VS Code extension (MVP scaffold, point-4 deliverable).
  *
- * This is deliberately minimal and NOT a copy-paste of src/scan — it's a
- * standalone extension because it runs client-side, in a different runtime
- * (VS Code's extension host), on a different trigger (as you type/save,
- * not on PR diff), and needs its own debouncing so it doesn't hammer the
- * npm/PyPI registries on every keystroke. Treat this as the starting point
- * for the real thing, not the real thing itself:
- *
- *  - Only checks npm imports for now (no PyPI parity yet).
- *  - No typosquat/freshness signal yet — existence check only.
- *  - Not published anywhere. Publishing requires a publisher account on the
- *    VS Code Marketplace (or Open VSX for other editors) — that's an account
- *    you'd need to create; nothing about that step can be done for you.
- *
- * Why this is worth building at all, even at this scope: distribution here
- * happens where the hallucination is actually introduced — the moment a
- * developer accepts an AI suggestion — rather than after it's already
- * committed and pushed. That's a harder position for a competitor to match
- * with a PR-only tool, which is the actual point-4 thesis.
+ * Warden runs at the point where AI-generated imports are accepted, then
+ * mirrors the core package-risk signals without uploading source code.
  */
 
 import * as vscode from "vscode";
@@ -30,7 +14,7 @@ const IMPORT_PATTERNS = [
 
 const DEBOUNCE_MS = 800;
 const diagnostics = vscode.languages.createDiagnosticCollection("warden-check");
-const npmExistenceCache = new Map<string, boolean>(); // avoids re-checking the same package repeatedly in one session
+const npmExistenceCache = new Map<string, { exists: boolean; publishedDaysAgo?: number }>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function packageNameFromSpecifier(specifier: string): string | null {
@@ -40,15 +24,21 @@ function packageNameFromSpecifier(specifier: string): string | null {
   return parts[0] || null;
 }
 
-async function existsOnNpm(pkg: string): Promise<boolean> {
-  if (npmExistenceCache.has(pkg)) return npmExistenceCache.get(pkg)!;
+async function getNpmMetadata(pkg: string): Promise<{ exists: boolean; publishedDaysAgo?: number }> {
+  const cached = npmExistenceCache.get(pkg);
+  if (cached) return cached;
   try {
     const encoded = pkg.startsWith("@") ? `@${encodeURIComponent(pkg.slice(1))}` : encodeURIComponent(pkg);
-    const res = await fetch(`https://registry.npmjs.org/${encoded}`, { method: "HEAD" });
-    npmExistenceCache.set(pkg, res.ok);
-    return res.ok;
+    const res = await fetch(`https://registry.npmjs.org/${encoded}`);
+    if (res.status === 404) return { exists: false };
+    if (!res.ok) return { exists: true };
+    const data = await res.json() as { time?: { created?: string } };
+    const created = data.time?.created;
+    const result = { exists: true, publishedDaysAgo: created ? Math.floor((Date.now() - Date.parse(created)) / 86400000) : undefined };
+    npmExistenceCache.set(pkg, result);
+    return result;
   } catch {
-    return true; // fail open — a network blip shouldn't flag a real package
+    return { exists: true };
   }
 }
 
@@ -73,14 +63,18 @@ async function scanDocument(doc: vscode.TextDocument): Promise<void> {
     }
   }
 
-  const results = await Promise.all(found.map((f) => existsOnNpm(f.pkg)));
+  const results = await Promise.all(found.map((f) => getNpmMetadata(f.pkg)));
   const issues: vscode.Diagnostic[] = [];
   found.forEach((f, i) => {
-    if (!results[i]) {
+    const metadata = results[i];
+    if (!metadata.exists || (metadata.publishedDaysAgo !== undefined && metadata.publishedDaysAgo <= 45)) {
+      const message = !metadata.exists
+        ? `Package "${f.pkg}" was not found on npm — possible hallucinated package. Verify before installing.`
+        : `Package "${f.pkg}" is very new (${metadata.publishedDaysAgo} day(s) old). Confirm the publisher and repository before installing.`;
       const diagnostic = new vscode.Diagnostic(
         f.range,
-        `Package "${f.pkg}" was not found on the npm registry — possible hallucinated package name. Verify before installing.`,
-        vscode.DiagnosticSeverity.Warning
+        message,
+        !metadata.exists ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning
       );
       diagnostic.source = "Warden Check";
       issues.push(diagnostic);
@@ -111,6 +105,10 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("wardenCheck.scanActiveFile", () => {
+      const editor = vscode.window.activeTextEditor;
+      if (editor) return scanDocument(editor.document);
+    }),
     vscode.workspace.onDidOpenTextDocument(scanDocument),
     vscode.workspace.onDidSaveTextDocument(scanDocument),
     vscode.workspace.onDidChangeTextDocument((e) => scheduleDocumentScan(e.document))

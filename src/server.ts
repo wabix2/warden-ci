@@ -3,6 +3,7 @@ import path from "path";
 import { readFileSync } from "fs";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { setProStatus, getOwnerForSale, addToWaitlist, getWaitlist } from "./billing/store";
+import { scanFiles, ScannedFile } from "./scan";
 import { handlePullRequestWebhook } from "./github/webhookHandler";
 
 const app = express();
@@ -103,8 +104,9 @@ app.post(
       return res.status(401).send("Invalid signature");
     }
 
-    const saleId = String(req.body?.sale_id || req.body?.id || "").trim();
-    const productId = String(req.body?.product_id || "").trim();
+  const saleId = String(req.body?.sale_id || req.body?.id || "").trim();
+  const subscriptionId = String(req.body?.subscription_id || "").trim();
+  const productId = String(req.body?.product_id || "").trim();
     const productMap = Object.fromEntries((Object.keys(plans) as PlanKey[]).map((key) => [plans[key].productId(), key]));
     const plan = productMap[productId] as PlanKey | undefined;
     if (plan && plan !== "pro") return res.status(400).send("This tier is not available yet");
@@ -123,7 +125,7 @@ app.post(
       plan,
       gumroadProductId: productId,
       gumroadSaleId: saleId,
-      gumroadSubscriptionId: String(req.body?.subscription_id || "") || undefined,
+      gumroadSubscriptionId: subscriptionId || undefined,
       status: refunded ? "refunded" : canceled ? "canceled" : "active",
       refundedAt: refunded ? new Date().toISOString() : undefined,
       canceledAt: canceled ? new Date().toISOString() : undefined,
@@ -436,6 +438,21 @@ app.get("/admin/waitlist", async (req: Request, res: Response) => {
 // whitespace, or wrong casing is why /subscribe is still showing the waitlist view.
 // A value like "true " (trailing space) looks identical to "true" in most UI text
 // boxes but has length 5, not 4, and fails the strict === "true" check silently.
+app.post("/api/scan", async (req: Request, res: Response) => {
+  const expectedToken = process.env.WARDEN_API_TOKEN;
+  const suppliedToken = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  if (!expectedToken || suppliedToken !== expectedToken) return res.status(401).json({ ok: false, error: "Unauthorized" });
+  const files = Array.isArray(req.body?.files) ? req.body.files as ScannedFile[] : [];
+  if (files.length === 0 || files.length > 250) return res.status(400).json({ ok: false, error: "files must contain 1-250 changed files" });
+  try {
+    const result = await scanFiles(files);
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    console.error("Scan API error:", error);
+    return res.status(500).json({ ok: false, error: "Scan failed" });
+  }
+});
+
 app.get("/health", (_req: Request, res: Response) => {
   const rawFlag = process.env.GUMROAD_CHECKOUT_ENABLED;
   res.json({

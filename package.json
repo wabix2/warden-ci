@@ -5,7 +5,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "test:webhook": "node scripts/test-webhook.mjs"
+    "test:webhook": "node scripts/test-webhook.mjs",
+    "warden-scan": "node scripts/warden-scan.mjs"
   },
   "dependencies": {
     "@octokit/auth-app": "^7.2.2",
