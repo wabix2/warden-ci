@@ -18,6 +18,7 @@ const redis_1 = require("./lib/redis");
 const popularPackageRefresh_1 = require("./scan/popularPackageRefresh");
 const corpusLog_1 = require("./telemetry/corpusLog");
 const runAccess_1 = require("./auth/runAccess");
+const osv_1 = require("./remediation/osv");
 const app = (0, express_1.default)();
 const PORT = Number(process.env.PORT || 3000);
 const OAUTH_STATE_COOKIE = "warden_oauth_state";
@@ -232,12 +233,19 @@ app.post("/api/runs/:runId/findings/:findingId/fix", async (req, res) => {
             return res.status(403).json({ ok: false, error: "Remediation is not authorized" });
         if (!db_1.db)
             return res.status(503).json({ ok: false, error: "Database unavailable" });
-        const finding = (await db_1.db.select({ id: schema_1.findings.id }).from(schema_1.findings).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.findings.id, findingId), (0, drizzle_orm_1.eq)(schema_1.findings.scanRunId, runId))).limit(1))[0];
+        const finding = (await db_1.db.select({ id: schema_1.findings.id, packageName: schema_1.findings.packageName, ecosystem: schema_1.findings.ecosystem, currentVersion: schema_1.findings.currentVersion, manifestPath: schema_1.findings.manifestPath, affectedRange: schema_1.findings.affectedRange }).from(schema_1.findings).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.findings.id, findingId), (0, drizzle_orm_1.eq)(schema_1.findings.scanRunId, runId))).limit(1))[0];
         if (!finding)
             return res.status(404).json({ ok: false, error: "Finding not found" });
-        // Current findings do not yet persist advisory IDs, affected ranges, or the
-        // exact manifest content required for a safe write. Never guess or mutate GitHub.
-        return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "This finding lacks the advisory and manifest metadata required for safe remediation" });
+        if (!finding.packageName || !finding.ecosystem || !finding.currentVersion || !finding.manifestPath) {
+            return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "This finding lacks the advisory and manifest metadata required for safe remediation" });
+        }
+        const ecosystem = finding.ecosystem === "pypi" ? "python" : finding.ecosystem === "npm" ? "npm" : null;
+        if (!ecosystem)
+            return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "This ecosystem is not supported by deterministic remediation" });
+        const advisory = await (0, osv_1.resolveOsvAdvisory)(ecosystem, finding.packageName, finding.currentVersion);
+        if (!advisory?.fixedVersion)
+            return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "OSV did not provide a verified fixed version" });
+        return res.status(501).json({ ok: false, status: "permission_required", targetVersion: advisory.fixedVersion, advisoryId: advisory.id, error: "GitHub write authorization and remediation execution are not enabled yet" });
     }
     catch (error) {
         console.error("Remediation request failed:", error);
