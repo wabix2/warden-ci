@@ -2,7 +2,7 @@ import express, { Request, Response } from "express";
 import path from "path";
 import { readFileSync } from "fs";
 import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { setProStatus, getOwnerForSale, addToWaitlist, getWaitlist } from "./billing/store";
 import { scanFiles, ScannedFile } from "./scan";
 import { defaultScanPolicy, evaluatePolicy, toCycloneDx, toSarif, redact } from "./scan/enterprise";
@@ -236,6 +236,27 @@ app.get("/api/runs/:runId", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Run report access failed:", error);
     return res.status(502).json({ ok: false, error: "Could not load run report" });
+  }
+});
+
+app.post("/api/runs/:runId/findings/:findingId/fix", async (req: Request, res: Response) => {
+  const runId = String(req.params.runId || "");
+  const findingId = String(req.params.findingId || "");
+  if (!isUuid(runId) || !isUuid(findingId)) return res.status(404).json({ ok: false, error: "Finding not found" });
+  try {
+    const access = await authorizeRunAccess(req, runId);
+    if (access.kind === "unauthenticated") return res.status(401).json({ ok: false, error: "GitHub login required" });
+    if (access.kind === "not_found") return res.status(404).json({ ok: false, error: "Run not found" });
+    if (access.kind === "forbidden") return res.status(403).json({ ok: false, error: "Remediation is not authorized" });
+    if (!db) return res.status(503).json({ ok: false, error: "Database unavailable" });
+    const finding = (await db.select({ id: findings.id }).from(findings).where(and(eq(findings.id, findingId), eq(findings.scanRunId, runId))).limit(1))[0];
+    if (!finding) return res.status(404).json({ ok: false, error: "Finding not found" });
+    // Current findings do not yet persist advisory IDs, affected ranges, or the
+    // exact manifest content required for a safe write. Never guess or mutate GitHub.
+    return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "This finding lacks the advisory and manifest metadata required for safe remediation" });
+  } catch (error) {
+    console.error("Remediation request failed:", error);
+    return res.status(502).json({ ok: false, error: "Could not evaluate remediation request" });
   }
 });
 
