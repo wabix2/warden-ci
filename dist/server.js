@@ -43,16 +43,11 @@ async function dashboardInstallation(req, installationId) {
     const token = await (0, redis_1.getRedisClient)().get(`warden:oauth:session:${sessionId}`);
     if (!token)
         return null;
-    try {
-        return await (0, runAccess_1.authorizeInstallationAccess)(token, installationId, fetch);
-    }
-    catch (error) {
-        if (error.status === 401)
-            return null;
-        if (error.status === 403 || error.status === 404)
-            return false;
-        throw error;
-    }
+    // The settings mutate installation-wide telemetry behavior. GitHub's OAuth
+    // repository listing proves repository read access, not installation-wide
+    // administrative authority, so do not grant broader access on that basis.
+    // This remains fail-closed until a documented stronger proof is available.
+    return false;
 }
 // Fail loud at boot, not silently on the first user's request — if this prints on
 // deploy, the waitlist (and Pro-status checks) will fail until it's fixed.
