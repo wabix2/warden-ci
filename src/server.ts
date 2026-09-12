@@ -8,6 +8,8 @@ import { defaultScanPolicy, evaluatePolicy, toCycloneDx, toSarif, redact } from 
 import { db } from "./db";
 import { scanRuns, findings, auditEvents } from "./db/schema";
 import { handlePullRequestWebhook } from "./github/webhookHandler";
+import { getRedisClient } from "./lib/redis";
+import { schedulePopularPackageRefresh } from "./scan/popularPackageRefresh";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -491,4 +493,8 @@ app.get("/health", (_req: Request, res: Response) => {
   });
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  const hasRedis = Boolean(process.env.UPSTASH_REDIS_REST_URL?.trim() && process.env.UPSTASH_REDIS_REST_TOKEN?.trim());
+  schedulePopularPackageRefresh({ redis: hasRedis ? getRedisClient() : undefined });
+});

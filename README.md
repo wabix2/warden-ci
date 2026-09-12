@@ -64,10 +64,11 @@ the actual attempt at defensibility, in honest current state:
    review) — this is a legal gate, not a technical one.
 2. **Typosquat/freshness signal (`riskSignals.ts`)** — catches near-miss
    package names published recently, not just nonexistent ones. **Status:
-   built and live**, using a static seed list of popular packages
-   (`popularPackages.ts`). The honest next step, not yet done: replace the
-   static list with a scheduled job pulling real download-count data from
-   npm/PyPI, so "popular" reflects current reality instead of a snapshot.
+   built and live**, using a daily background refresh from npm's official
+   downloads API and pypistats.org. The checked-in lists are bootstrap
+   candidates; complete snapshots are ranked to the top 100, cached in Redis,
+   and retained in memory when sources fail. The refresh never runs on the PR
+   request path.
 3. **Multi-ecosystem breadth (`ecosystems/`)** — npm and PyPI both work
    today, behind a shared interface designed so a third registry is an
    adapter, not a rewrite. **Status: built and live** for these two;
