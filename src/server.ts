@@ -4,6 +4,9 @@ import { readFileSync } from "fs";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { setProStatus, getOwnerForSale, addToWaitlist, getWaitlist } from "./billing/store";
 import { scanFiles, ScannedFile } from "./scan";
+import { defaultScanPolicy, evaluatePolicy, toCycloneDx, toSarif, redact } from "./scan/enterprise";
+import { db } from "./db";
+import { scanRuns, findings, auditEvents } from "./db/schema";
 import { handlePullRequestWebhook } from "./github/webhookHandler";
 
 const app = express();
@@ -177,6 +180,22 @@ app.get("/details", (_req: Request, res: Response) => {
 
 app.get("/dashboard", (_req: Request, res: Response) => {
   res.sendFile(path.join(__dirname, "..", "dashboard.html"));
+});
+
+app.get("/api/dashboard/summary", async (req: Request, res: Response) => {
+  const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+  if (!process.env.WARDEN_API_TOKEN || token !== process.env.WARDEN_API_TOKEN) return res.status(401).json({ ok: false, error: "Unauthorized" });
+  if (!db) return res.status(503).json({ ok: false, error: "Database unavailable" });
+  const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 100);
+  try {
+    const runs = await db.select().from(scanRuns).limit(limit);
+    const recentFindings = await db.select().from(findings).limit(limit);
+    const audit = await db.select().from(auditEvents).limit(limit);
+    return res.json({ ok: true, generatedAt: new Date().toISOString(), summary: { scans: runs.length, blocked: runs.filter((run) => run.verdict === "failure").length, findings: recentFindings.length }, runs, findings: recentFindings, audit });
+  } catch (error) {
+    console.error("Dashboard summary error:", error);
+    return res.status(500).json({ ok: false, error: "Could not load dashboard data" });
+  }
 });
 
 /**
@@ -446,7 +465,11 @@ app.post("/api/scan", async (req: Request, res: Response) => {
   if (files.length === 0 || files.length > 250) return res.status(400).json({ ok: false, error: "files must contain 1-250 changed files" });
   try {
     const result = await scanFiles(files);
-    return res.json({ ok: true, ...result });
+    const policy = evaluatePolicy(result, defaultScanPolicy);
+    const format = String(req.query.format || "json");
+    const payload = format === "sarif" ? toSarif(result) : format === "cyclonedx" ? toCycloneDx(result) : { ok: true, ...result, policy };
+    res.type(format === "sarif" ? "application/sarif+json" : "application/json");
+    return res.json(JSON.parse(redact(JSON.stringify(payload))));
   } catch (error) {
     console.error("Scan API error:", error);
     return res.status(500).json({ ok: false, error: "Scan failed" });

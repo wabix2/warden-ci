@@ -147,6 +147,12 @@ every restart). If you're taking real payments, consider whether the ~30s
 cold-start delay after a spin-down is acceptable for your customers, or
 whether it's time to move to a paid instance.
 
+## Enterprise outputs and policy
+
+The scan API supports `?format=sarif` for GitHub code-scanning-compatible results and `?format=cyclonedx` for dependency inventory exchange. Copy `warden-policy.example.json` to `warden-policy.json` and review it in code review; policy history and suppressions are persisted in Neon so exceptions are attributable and can expire.
+
+The repository also includes `.github/workflows/warden-scan.yml` as a reference GitHub Action. It fails closed when the API reports blocking findings and requires `WARDEN_URL` plus `WARDEN_API_TOKEN` repository secrets.
+
 ## Local and CI scanning
 
 Warden exposes the same scanner through a token-protected API for CI and editor integrations. Set `WARDEN_URL` and `WARDEN_API_TOKEN`, then run `pnpm warden-scan path/to/diff.patch`; exit code 1 means the gate failed. The endpoint rejects unauthenticated requests and does not send source contents to telemetry.

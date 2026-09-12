@@ -1,0 +1,10 @@
+{
+  "$schema": "https://warden-ci.dev/schemas/policy.schema.json",
+  "version": 1,
+  "mode": "block",
+  "minimumSeverity": "failure",
+  "failOnIncomplete": true,
+  "blockCategories": ["secret", "execution", "dependency"],
+  "ignoredPaths": ["**/fixtures/**", "**/vendor/**"],
+  "suppressions": []
+}

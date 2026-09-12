@@ -163,6 +163,7 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
       name: "Warden CI",
       head_sha: headSha,
       status: "in_progress",
+      output: { title: "Warden is scanning this pull request", summary: "Fetching changed files and evaluating policy." },
     });
 
     const files = await octokit.paginate(octokit.pulls.listFiles, {
@@ -172,11 +173,13 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
       per_page: 100,
     });
 
-    const { annotations, packageFlags, filesScanned, filesSkipped } = await scanFiles(
-      files.map((f) => ({ filename: f.filename, patch: f.patch }))
-    );
-
+    const scanResult = await scanFiles(files.map((f) => ({ filename: f.filename, patch: f.patch })));
+    const { annotations, packageFlags, filesScanned, filesSkipped } = scanResult;
     const gate = evaluateGate(annotations);
+    const incomplete = scanResult.verdict === "incomplete";
+    if (incomplete) {
+      console.warn(`Warden scan ${deliveryId || "unknown"} is incomplete: ${filesSkipped} file(s) had no patch`);
+    }
 
     if (db && scanRun) {
       await db.insert(findings).values(annotations.map((annotation, index) => ({
@@ -192,7 +195,7 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
       })));
       await db.update(scanRuns).set({
         status: "completed",
-        verdict: gate.shouldBlock ? "failure" : "success",
+        verdict: gate.shouldBlock ? "failure" : incomplete ? "incomplete" : "success",
         findingsCount: annotations.length,
         completedAt: new Date(),
       }).where(eq(scanRuns.id, scanRun.id));
@@ -203,7 +206,7 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
       repo,
       check_run_id: checkRun.data.id,
       status: "completed",
-      conclusion: gate.shouldBlock ? "failure" : annotations.length > 0 ? "neutral" : "success",
+      conclusion: gate.shouldBlock || incomplete ? "failure" : annotations.length > 0 ? "neutral" : "success",
       output: {
         title: annotations.length === 0 ? "No issues found" : `${annotations.length} finding(s)`,
         summary: summaryFor(annotations, filesScanned, filesSkipped),

@@ -6,6 +6,8 @@ import { assessPackage, PackageVerdict } from "./riskSignals";
 import { npmEcosystem } from "./ecosystems/npm";
 import { pypiEcosystem } from "./ecosystems/pypi";
 import { Ecosystem } from "./ecosystems/types";
+import { rustEcosystem } from "./ecosystems/rust";
+import { rubyEcosystem } from "./ecosystems/ruby";
 
 export interface ScannedFile {
   filename: string;
@@ -45,7 +47,7 @@ export interface ScanResult {
 
 const MAX_ANNOTATIONS = 50; // GitHub Check Run API accepts at most 50 annotations per request
 
-const ECOSYSTEMS: Ecosystem[] = [npmEcosystem, pypiEcosystem];
+const ECOSYSTEMS: Ecosystem[] = [npmEcosystem, pypiEcosystem, rustEcosystem, rubyEcosystem];
 
 function ecosystemForFile(filename: string): Ecosystem | undefined {
   const ext = path.extname(filename).toLowerCase();
@@ -111,6 +113,10 @@ export async function scanFiles(files: ScannedFile[]): Promise<ScanResult> {
 
   for (const file of files) {
     const addedLines = parseAddedLines(file.patch);
+    if (file.patch === null || file.patch === undefined) {
+      filesSkipped += 1;
+      continue;
+    }
     if (addedLines.length === 0) {
       filesSkipped += 1;
       continue;
@@ -145,5 +151,6 @@ export async function scanFiles(files: ScannedFile[]): Promise<ScanResult> {
   }
 
   const hasBlockingFinding = annotations.some((annotation) => annotation.severity === "failure");
-  return { annotations, packageFlags, filesScanned, filesSkipped, verdict: hasBlockingFinding ? "fail" : "pass", durationMs: Date.now() - startedAt };
+  const incomplete = filesSkipped > 0;
+  return { annotations, packageFlags, filesScanned, filesSkipped, verdict: hasBlockingFinding ? "fail" : incomplete ? "incomplete" : "pass", durationMs: Date.now() - startedAt };
 }

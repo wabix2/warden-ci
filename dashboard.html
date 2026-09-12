@@ -15,5 +15,20 @@
     <section class="stats" aria-label="Security summary"><div class="stat"><div class="stat-label">Scans this month</div><div class="stat-value">—</div></div><div class="stat"><div class="stat-label">Blocked merges</div><div class="stat-value bad">—</div></div><div class="stat"><div class="stat-label">Open findings</div><div class="stat-value warn">—</div></div><div class="stat"><div class="stat-label">Protected repos</div><div class="stat-value good">—</div></div></section>
     <section class="grid"><article class="panel"><h2>Recent gate decisions</h2><div class="notice">Live scan history appears here after the GitHub App is installed and the first protected pull request is evaluated. Warden does not display fabricated security metrics.</div></article><aside class="panel"><h2>Active policy</h2><div class="policy"><span>Mode</span><span class="switch">BLOCK</span></div><div class="policy"><span>Secrets</span><span class="switch">ON</span></div><div class="policy"><span>Malicious packages</span><span class="switch">ON</span></div><div class="policy"><span>Dangerous exec</span><span class="switch">ON</span></div><div class="policy"><span>Minimum severity</span><span class="switch">HIGH</span></div><div class="notice">Fail closed: if billing or policy storage is unavailable, private-repository scans do not silently become free.</div></aside></section>
   </main>
+  <script>
+    const token = window.prompt("Warden dashboard token");
+    async function loadLiveData() {
+      if (!token) return;
+      const response = await fetch('/api/dashboard/summary?limit=25', { headers: { Authorization: `Bearer ${token}` } });
+      if (!response.ok) return;
+      const data = await response.json();
+      const stats = document.querySelectorAll('.stat-value');
+      stats[0].textContent = String(data.summary.scans);
+      stats[1].textContent = String(data.summary.blocked);
+      stats[2].textContent = String(data.summary.findings);
+      document.querySelector('.notice').textContent = `Live data refreshed ${new Date(data.generatedAt).toLocaleString()}. ${data.runs.length} durable scan records loaded.`;
+    }
+    loadLiveData();
+  </script>
 </body>
 </html>
