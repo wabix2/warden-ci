@@ -1,7 +1,7 @@
 import express, { Request, Response } from "express";
 import path from "path";
 import { readFileSync } from "fs";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
 import { setProStatus, getOwnerForSale, addToWaitlist, getWaitlist } from "./billing/store";
 import { scanFiles, ScannedFile } from "./scan";
 import { defaultScanPolicy, evaluatePolicy, toCycloneDx, toSarif, redact } from "./scan/enterprise";
@@ -10,9 +10,37 @@ import { scanRuns, findings, auditEvents } from "./db/schema";
 import { handlePullRequestWebhook } from "./github/webhookHandler";
 import { getRedisClient } from "./lib/redis";
 import { schedulePopularPackageRefresh } from "./scan/popularPackageRefresh";
+import { setInstallationCorpusOptOut, setPrivateCorpusOptIn } from "./telemetry/corpusLog";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
+const OAUTH_STATE_COOKIE = "warden_oauth_state";
+const SESSION_COOKIE = "warden_session";
+const SESSION_TTL_SECONDS = 60 * 60 * 8;
+
+function cookieValue(req: Request, name: string): string | undefined {
+  const header = req.headers.cookie ?? "";
+  return header.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1);
+}
+
+function secureCookie(req: Request): string {
+  return req.secure || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
+}
+
+async function githubJson<T>(url: string, token: string): Promise<T> {
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" } });
+  if (!response.ok) throw new Error(`GitHub OAuth request failed (${response.status})`);
+  return await response.json() as T;
+}
+
+async function dashboardInstallation(req: Request): Promise<Set<number> | null> {
+  const sessionId = cookieValue(req, SESSION_COOKIE);
+  if (!sessionId) return null;
+  const token = await getRedisClient().get<string>(`warden:oauth:session:${sessionId}`);
+  if (!token) return null;
+  const data = await githubJson<{ installations: Array<{ id: number }> }>("https://api.github.com/user/installations", token);
+  return new Set(data.installations.map((installation) => installation.id));
+}
 
 // Fail loud at boot, not silently on the first user's request — if this prints on
 // deploy, the waitlist (and Pro-status checks) will fail until it's fixed.
@@ -182,6 +210,59 @@ app.get("/details", (_req: Request, res: Response) => {
 
 app.get("/dashboard", (_req: Request, res: Response) => {
   res.sendFile(path.join(__dirname, "..", "dashboard.html"));
+});
+
+app.get("/auth/github", (_req: Request, res: Response) => {
+  const clientId = process.env.GITHUB_OAUTH_CLIENT_ID;
+  if (!clientId) return res.status(503).send("GitHub OAuth is not configured");
+  const state = randomBytes(24).toString("hex");
+  const callback = `${process.env.PUBLIC_BASE_URL || `${_req.protocol}://${_req.get("host")}`}/auth/github/callback`;
+  void getRedisClient().set(`warden:oauth:state:${state}`, "1", { ex: 600 });
+  res.setHeader("Set-Cookie", `${OAUTH_STATE_COOKIE}=${state}; HttpOnly; SameSite=Lax; Path=/${secureCookie(_req)}`);
+  res.redirect(`https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(callback)}&scope=read:org`);
+});
+
+app.get("/auth/github/callback", async (req: Request, res: Response) => {
+  const state = String(req.query.state || "");
+  const expected = cookieValue(req, OAUTH_STATE_COOKIE);
+  if (!state || !expected || state !== expected || await getRedisClient().get(`warden:oauth:state:${state}`) !== "1") return res.status(403).send("Invalid OAuth state");
+  try {
+    const response = await fetch("https://github.com/login/oauth/access_token", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify({ client_id: process.env.GITHUB_OAUTH_CLIENT_ID, client_secret: process.env.GITHUB_OAUTH_CLIENT_SECRET, code: String(req.query.code || "") }) });
+    const data = await response.json() as { access_token?: string };
+    if (!data.access_token) return res.status(401).send("GitHub OAuth failed");
+    const sessionId = randomBytes(32).toString("hex");
+    await getRedisClient().set(`warden:oauth:session:${sessionId}`, data.access_token, { ex: SESSION_TTL_SECONDS });
+    res.setHeader("Set-Cookie", `${SESSION_COOKIE}=${sessionId}; HttpOnly; SameSite=Lax; Path=/${secureCookie(req)}`);
+    return res.redirect("/dashboard");
+  } catch (error) {
+    console.error("GitHub OAuth callback failed:", error);
+    return res.status(502).send("GitHub OAuth is unavailable");
+  }
+});
+
+app.get("/api/telemetry/settings", async (req: Request, res: Response) => {
+  const installationId = Number(req.query.installationId);
+  if (!Number.isSafeInteger(installationId) || installationId <= 0) return res.status(400).json({ ok: false, error: "Invalid installation ID" });
+  try {
+    const installations = await dashboardInstallation(req);
+    if (!installations) return res.status(401).json({ ok: false, error: "GitHub login required" });
+    if (!installations.has(installationId)) return res.status(403).json({ ok: false, error: "Installation is not authorized for this GitHub account" });
+    const redis = getRedisClient();
+    return res.json({ ok: true, publicOptedOut: (await redis.get(`warden:telemetry:optout:${installationId}`)) === "1", privateOptedIn: (await redis.get(`warden:telemetry:optout:private:${installationId}`)) === "enabled" });
+  } catch (error) { console.error("Telemetry settings read failed:", error); return res.status(502).json({ ok: false, error: "Could not verify GitHub installation" }); }
+});
+
+app.put("/api/telemetry/settings", async (req: Request, res: Response) => {
+  const installationId = Number(req.body?.installationId);
+  if (!Number.isSafeInteger(installationId) || installationId <= 0) return res.status(400).json({ ok: false, error: "Invalid installation ID" });
+  try {
+    const installations = await dashboardInstallation(req);
+    if (!installations) return res.status(401).json({ ok: false, error: "GitHub login required" });
+    if (!installations.has(installationId)) return res.status(403).json({ ok: false, error: "Installation is not authorized for this GitHub account" });
+    if (typeof req.body.publicOptedOut === "boolean") await setInstallationCorpusOptOut(installationId, req.body.publicOptedOut);
+    if (typeof req.body.privateOptedIn === "boolean") await setPrivateCorpusOptIn(installationId, req.body.privateOptedIn);
+    return res.json({ ok: true });
+  } catch (error) { console.error("Telemetry settings write failed:", error); return res.status(502).json({ ok: false, error: "Could not update telemetry settings" }); }
 });
 
 app.get("/api/dashboard/summary", async (req: Request, res: Response) => {
