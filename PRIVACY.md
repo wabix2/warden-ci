@@ -28,25 +28,26 @@ Warden CI is installed as a GitHub App with the following permissions:
   your Gumroad customer ID and subscription status to know whether to unlock
   private-repo scanning.
 
-## Detection corpus (only if telemetry is enabled — see below)
+## Detection corpus
 
-**⚠️ TODO before this section is accurate: `WARDEN_TELEMETRY_ENABLED` currently
-defaults to off. Do not set it to `true` for real customers until this section
-has actually been reviewed and this policy is genuinely in effect — this text
-exists so the disclosure is ready when that decision is made, not as
-confirmation it's already happening.**
+The detection corpus is enabled by default for public-repository scans. It stores
+only these fields: `ecosystem`, `packageName`, `verdict`, optional
+`impersonating`, and an ISO timestamp. The installation ID is used only to
+resolve the per-installation setting and is never written into corpus events.
+Raw event samples are retained for 90 days; aggregate package/verdict counts are
+retained for 365 days, after which Redis expires them.
 
-When enabled, Warden CI records which package names get flagged as
-non-existent or typosquat-suspect, across all installations, to improve
-detection accuracy over time. What is stored:
-- The flagged package name, its registry (npm/PyPI), and the verdict.
-- The GitHub installation ID that triggered the flag (an opaque number, not
-  your account name or email).
+Private-repository scans are excluded by default. A customer may explicitly opt
+in a GitHub installation through the installation telemetry setting; public
+installations may opt out using the same setting. Telemetry failures never fail
+or alter a scan.
 
-What is **never** stored as part of this: your source code, file paths, file
-contents, repository names, or your GitHub account/organization login. This
-data cannot be used to identify what code you're writing — only which package
-names have been flagged, in aggregate, across the product.
+The corpus never stores source code, diff content, file paths, repository names,
+organization or user logins, GitHub installation IDs, billing identifiers, or
+account identity. The logger's input type intentionally contains only the five
+disclosed package-event fields, making those exclusions structural rather than
+caller convention.
+
 
 ## What we store
 
