@@ -53,12 +53,22 @@ async function fetchMetadata(packageName: string): Promise<PackageMetadata> {
       // registry hiccup any other way with this endpoint.
       return { existsOnRegistry: res.status !== 404 };
     }
-    const data = (await res.json()) as { time?: Record<string, string> };
+    const data = (await res.json()) as {
+      time?: Record<string, string>;
+      "dist-tags"?: { latest?: string };
+      versions?: Record<string, { _npmUser?: { name?: string } }>;
+    };
     const created = data.time?.created;
-    const publishedDaysAgo = created
-      ? Math.floor((Date.now() - new Date(created).getTime()) / (1000 * 60 * 60 * 24))
-      : undefined;
-    return { existsOnRegistry: true, publishedDaysAgo };
+    const latestVersion = data["dist-tags"]?.latest;
+    const releaseTimes = Object.entries(data.time ?? {}).filter(([version, value]) => version !== "created" && version !== "modified" && !Number.isNaN(Date.parse(value)));
+    const latestRelease = latestVersion ? data.time?.[latestVersion] : undefined;
+    const publisherSequence = releaseTimes.map(([version]) => data.versions?.[version]?._npmUser?.name).filter((name): name is string => Boolean(name));
+    const publisherHistory = [...new Set(publisherSequence)];
+    const latestPublisher = publisherSequence.at(-1);
+    const previousPublisher = publisherSequence.at(-2);
+    const publishedDaysAgo = created ? Math.floor((Date.now() - new Date(created).getTime()) / (1000 * 60 * 60 * 24)) : undefined;
+    const latestReleaseDaysAgo = latestRelease ? Math.floor((Date.now() - new Date(latestRelease).getTime()) / (1000 * 60 * 60 * 24)) : undefined;
+    return { existsOnRegistry: true, publishedDaysAgo, latestVersion, releaseCount: releaseTimes.length, publisherHistory, latestPublisher, publisherChangedRecently: Boolean(latestPublisher && previousPublisher && latestPublisher !== previousPublisher), latestReleaseDaysAgo };
   } catch (err) {
     console.error(`npm metadata lookup failed for "${packageName}":`, err);
     return { existsOnRegistry: true }; // fail open on network errors

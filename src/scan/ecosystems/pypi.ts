@@ -42,7 +42,9 @@ async function fetchMetadata(packageName: string): Promise<PackageMetadata> {
     if (!res.ok) {
       return { existsOnRegistry: res.status !== 404 };
     }
-    const data = (await res.json()) as { releases?: Record<string, Array<{ upload_time_iso_8601?: string }>> };
+    // PyPI JSON exposes release files and upload timestamps, but no per-release
+    // uploader identity. Maintainer-takeover detection is therefore npm-only.
+    const data = (await res.json()) as { info?: { version?: string }; releases?: Record<string, Array<{ upload_time_iso_8601?: string }>> };
     let earliest: number | undefined;
     for (const files of Object.values(data.releases ?? {})) {
       for (const file of files) {
@@ -52,7 +54,8 @@ async function fetchMetadata(packageName: string): Promise<PackageMetadata> {
       }
     }
     const publishedDaysAgo = earliest !== undefined ? Math.floor((Date.now() - earliest) / (1000 * 60 * 60 * 24)) : undefined;
-    return { existsOnRegistry: true, publishedDaysAgo };
+    const releaseCount = Object.keys(data.releases ?? {}).length;
+    return { existsOnRegistry: true, publishedDaysAgo, latestVersion: data.info?.version, releaseCount };
   } catch (err) {
     console.error(`PyPI metadata lookup failed for "${packageName}":`, err);
     return { existsOnRegistry: true };

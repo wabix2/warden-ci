@@ -34,6 +34,8 @@ export interface PackageFlag {
   verdict: PackageVerdict["verdict"];
   packageName: string;
   impersonating?: string;
+  latestVersion?: string;
+  latestPublisher?: string;
 }
 
 export interface ScanResult {
@@ -70,7 +72,7 @@ async function checkPackageRisk(
       const verdict = results[idx];
       if (!verdict) return;
 
-      flags.push({ ecosystem: ecosystem.id, verdict: verdict.verdict, packageName: pkg, impersonating: verdict.impersonating });
+      flags.push({ ecosystem: ecosystem.id, verdict: verdict.verdict, packageName: pkg, impersonating: verdict.impersonating, latestVersion: verdict.latestVersion, latestPublisher: verdict.latestPublisher });
 
       const lines = linesByPackage.get(pkg)!;
       for (const line of lines) {
@@ -85,7 +87,7 @@ async function checkPackageRisk(
             remediation: `Confirm the package name on the ${ecosystem.label} registry and pin a trusted version before merging.`,
             fingerprint: `dependency:${ecosystem.id}:${pkg}:hallucinated`,
           });
-        } else {
+        } else if (verdict.verdict === "typosquat-suspect") {
           annotations.push({
             line,
             title: "Possible typosquat package",
@@ -93,8 +95,30 @@ async function checkPackageRisk(
             message: `Package "${pkg}" exists but was only published ${verdict.publishedDaysAgo} day(s) ago and is a near-exact match for the popular package "${verdict.impersonating}". This is a common pattern for typosquat/slopsquat attacks — confirm this is the package you meant before merging.`,
             category: "dependency",
             confidence: "high",
-            remediation: `Compare the package owner, repository, release history, and lockfile before approving this dependency.`,
+            remediation: "Compare the package owner, repository, release history, and lockfile before approving this dependency.",
             fingerprint: `dependency:${ecosystem.id}:${pkg}:typosquat:${verdict.impersonating}`,
+          });
+        } else if (verdict.verdict === "dependency-confusion-suspect") {
+          annotations.push({
+            line,
+            title: "Possible dependency-confusion package",
+            severity: "failure",
+            message: `Package "${pkg}" has a high major version (${verdict.latestVersion}) but a thin, recent release history. Public metadata cannot prove an internal-name collision; treat this as a review signal for possible version-shadowing behavior.`,
+            category: "dependency",
+            confidence: "medium",
+            remediation: "Compare this name against your private registries and lockfile policy, then verify the publisher and intended source before merging.",
+            fingerprint: `dependency:${ecosystem.id}:${pkg}:dependency-confusion`,
+          });
+        } else {
+          annotations.push({
+            line,
+            title: "Possible maintainer takeover",
+            severity: "failure",
+            message: `Popular npm package "${pkg}" appears to have a recent release from a different observed publisher (${verdict.latestPublisher ?? "unknown"}). Public metadata cannot prove compromise; verify the release and publisher before merging.`,
+            category: "dependency",
+            confidence: "medium",
+            remediation: "Review the release provenance, publisher account, signed artifacts, and lockfile before approving this dependency.",
+            fingerprint: `dependency:${ecosystem.id}:${pkg}:maintainer-takeover`,
           });
         }
       }
