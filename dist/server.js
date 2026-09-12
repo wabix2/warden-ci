@@ -201,7 +201,7 @@ app.get("/api/runs/:runId", async (req, res) => {
         const reportFindings = await db_1.db.select({
             id: schema_1.findings.id, severity: schema_1.findings.severity, category: schema_1.findings.category, title: schema_1.findings.title,
             message: schema_1.findings.message, filePath: schema_1.findings.filePath, lineNumber: schema_1.findings.lineNumber,
-            remediation: schema_1.findings.remediation, status: schema_1.findings.status, createdAt: schema_1.findings.createdAt,
+            remediation: schema_1.findings.remediation, packageName: schema_1.findings.packageName, ecosystem: schema_1.findings.ecosystem, manifestPath: schema_1.findings.manifestPath, advisoryId: schema_1.findings.advisoryId, affectedRange: schema_1.findings.affectedRange, currentVersion: schema_1.findings.currentVersion, status: schema_1.findings.status, createdAt: schema_1.findings.createdAt,
         }).from(schema_1.findings).where((0, drizzle_orm_1.eq)(schema_1.findings.scanRunId, runId));
         return res.json({ ok: true, run: {
                 id: access.run.id, scanTimestamp: access.run.completedAt || access.run.startedAt || access.run.createdAt,

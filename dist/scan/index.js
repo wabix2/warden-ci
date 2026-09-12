@@ -118,7 +118,7 @@ async function scanFiles(files) {
             if (linesByPackage.size > 0) {
                 const { annotations: pkgAnnotations, flags } = await checkPackageRisk(ecosystem, linesByPackage);
                 for (const a of pkgAnnotations) {
-                    annotations.push({ ...a, path: file.filename });
+                    annotations.push({ ...a, path: file.filename, packageName: a.fingerprint.split(":")[2] || undefined, ecosystem: ecosystem.id, manifestPath: ecosystem.id === "npm" ? "package.json" : ecosystem.id === "pypi" ? "requirements.txt" : undefined });
                 }
                 packageFlags.push(...flags);
             }

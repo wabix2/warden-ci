@@ -223,6 +223,9 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
         title: annotation.title,
         message: annotation.message,
         remediation: annotation.remediation,
+        packageName: annotation.packageName,
+        ecosystem: annotation.ecosystem,
+        manifestPath: annotation.manifestPath,
         filePath: annotation.path,
         lineNumber: annotation.line,
       })));

@@ -223,7 +223,7 @@ app.get("/api/runs/:runId", async (req: Request, res: Response) => {
     const reportFindings = await db.select({
       id: findings.id, severity: findings.severity, category: findings.category, title: findings.title,
       message: findings.message, filePath: findings.filePath, lineNumber: findings.lineNumber,
-      remediation: findings.remediation, status: findings.status, createdAt: findings.createdAt,
+      remediation: findings.remediation, packageName: findings.packageName, ecosystem: findings.ecosystem, manifestPath: findings.manifestPath, advisoryId: findings.advisoryId, affectedRange: findings.affectedRange, currentVersion: findings.currentVersion, status: findings.status, createdAt: findings.createdAt,
     }).from(findings).where(eq(findings.scanRunId, runId));
     return res.json({ ok: true, run: {
       id: access.run.id, scanTimestamp: access.run.completedAt || access.run.startedAt || access.run.createdAt,
