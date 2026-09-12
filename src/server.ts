@@ -279,8 +279,11 @@ app.post("/api/runs/:runId/findings/:findingId/fix", async (req: Request, res: R
     const remediation = await db.insert(remediations).values({ findingId, installationId: row.repository.installationId, repositoryId: row.repository.id, packageName: finding.packageName, targetVersion: advisory.fixedVersion, status: "creating" }).onConflictDoNothing().returning({ id: remediations.id });
     const created = remediation[0];
     const pr = await createRemediationPullRequest(octokit, { owner, repo, baseBranch: row.repository.defaultBranch, baseSha: base.data.commit.sha, runId, findingId, reportUrl: `${process.env.PUBLIC_BASE_URL || ""}/details?runId=${runId}`, advisoryId: advisory.id, result });
-    await db.update(remediations).set({ status: "created_unverified", branchName: pr.branch, pullRequestNumber: pr.pullRequestNumber, pullRequestUrl: pr.pullRequestUrl, verificationStatus: "unverified", updatedAt: new Date() }).where(created ? eq(remediations.id, created.id) : and(eq(remediations.findingId, findingId), eq(remediations.targetVersion, advisory.fixedVersion)));
-    return res.status(201).json({ ok: true, status: "created_unverified", pullRequestUrl: pr.pullRequestUrl, pullRequestNumber: pr.pullRequestNumber });
+    const verification = await resolveOsvAdvisory(ecosystem, finding.packageName, advisory.fixedVersion);
+    const verificationStatus = verification ? "verification_failed" : "verified_fixed";
+    const remediationStatus = verification ? "verification_failed" : "verified_fixed";
+    await db.update(remediations).set({ status: remediationStatus, branchName: pr.branch, pullRequestNumber: pr.pullRequestNumber, pullRequestUrl: pr.pullRequestUrl, verificationStatus, updatedAt: new Date() }).where(created ? eq(remediations.id, created.id) : and(eq(remediations.findingId, findingId), eq(remediations.targetVersion, advisory.fixedVersion)));
+    return res.status(201).json({ ok: true, status: remediationStatus, pullRequestUrl: pr.pullRequestUrl, pullRequestNumber: pr.pullRequestNumber });
   } catch (error) {
     console.error("Remediation request failed:", error);
     return res.status(502).json({ ok: false, error: "Could not evaluate remediation request" });
