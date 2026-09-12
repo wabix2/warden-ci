@@ -27,7 +27,7 @@ import { isProActive } from "../billing/store";
 import { getRedisClient } from "../lib/redis";
 import { evaluateGate } from "../enforcement/policy";
 import { db } from "../db";
-import { scanRuns, findings } from "../db/schema";
+import { installations, repositories, scanRuns, findings } from "../db/schema";
 
 const ACTIONABLE_ACTIONS = new Set(["opened", "synchronize", "reopened"]);
 
@@ -115,14 +115,43 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
     }
 
     const octokit = getInstallationClient(installationId);
-    const scanRun = db ? (await db.insert(scanRuns).values({
-      repositoryId: String(payload.repository?.id || installationId) as never,
-      githubDeliveryId: deliveryId || undefined,
-      pullRequestNumber: prNumber,
-      commitSha: headSha,
-      status: "running",
-      startedAt: new Date(),
-    }).returning({ id: scanRuns.id }))[0] : undefined;
+    let scanRun: { id: string } | undefined;
+    if (db) {
+      const installation = (await db.insert(installations).values({
+        githubInstallationId: Number(installationId),
+        accountLogin: String(payload.installation?.account?.login || owner),
+        accountType: String(payload.installation?.account?.type || "Unknown"),
+      }).onConflictDoUpdate({
+        target: installations.githubInstallationId,
+        set: {
+          accountLogin: String(payload.installation?.account?.login || owner),
+          accountType: String(payload.installation?.account?.type || "Unknown"),
+          updatedAt: new Date(),
+        },
+      }).returning({ id: installations.id }))[0];
+      const repository = (await db.insert(repositories).values({
+        installationId: installation.id,
+        githubRepositoryId: Number(payload.repository.id),
+        fullName: String(payload.repository.full_name || `${owner}/${repo}`),
+        defaultBranch: String(payload.repository.default_branch || "main"),
+      }).onConflictDoUpdate({
+        target: repositories.githubRepositoryId,
+        set: {
+          installationId: installation.id,
+          fullName: String(payload.repository.full_name || `${owner}/${repo}`),
+          defaultBranch: String(payload.repository.default_branch || "main"),
+          updatedAt: new Date(),
+        },
+      }).returning({ id: repositories.id }))[0];
+      scanRun = (await db.insert(scanRuns).values({
+        repositoryId: repository.id,
+        githubDeliveryId: deliveryId || undefined,
+        pullRequestNumber: prNumber,
+        commitSha: headSha,
+        status: "running",
+        startedAt: new Date(),
+      }).returning({ id: scanRuns.id }))[0];
+    }
 
     // Private-repo scanning is a Pro feature. Public repos always scan free —
     // that's the distribution engine (see README "Pricing"). This is the first
@@ -213,7 +242,7 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
       conclusion: gate.shouldBlock || incomplete ? "failure" : annotations.length > 0 ? "neutral" : "success",
       output: {
         title: annotations.length === 0 ? "No issues found" : `${annotations.length} finding(s)`,
-        summary: summaryFor(annotations, filesScanned, filesSkipped),
+        summary: `${summaryFor(annotations, filesScanned, filesSkipped)}${scanRun ? `\n\n[View security report](${process.env.PUBLIC_BASE_URL || ""}/details?runId=${encodeURIComponent(scanRun.id)})` : ""}`,
         annotations: annotations.map((a) => ({
           path: a.path,
           start_line: a.line,

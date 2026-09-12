@@ -7,6 +7,7 @@ const express_1 = __importDefault(require("express"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = require("fs");
 const node_crypto_1 = require("node:crypto");
+const drizzle_orm_1 = require("drizzle-orm");
 const store_1 = require("./billing/store");
 const scan_1 = require("./scan");
 const enterprise_1 = require("./scan/enterprise");
@@ -16,6 +17,7 @@ const webhookHandler_1 = require("./github/webhookHandler");
 const redis_1 = require("./lib/redis");
 const popularPackageRefresh_1 = require("./scan/popularPackageRefresh");
 const corpusLog_1 = require("./telemetry/corpusLog");
+const runAccess_1 = require("./auth/runAccess");
 const app = (0, express_1.default)();
 const PORT = Number(process.env.PORT || 3000);
 const OAUTH_STATE_COOKIE = "warden_oauth_state";
@@ -41,9 +43,9 @@ async function dashboardInstallation(req, installationId) {
     const token = await (0, redis_1.getRedisClient)().get(`warden:oauth:session:${sessionId}`);
     if (!token)
         return null;
-    // GitHub's installation-specific user endpoint is stricter than listing all
-    // installations visible to a user. A settings mutation is allowed only when
-    // GitHub confirms this OAuth principal can administer this installation.
+    // Use GitHub's installation-specific user endpoint rather than trusting the
+    // broad /user/installations listing. GitHub must explicitly authorize this
+    // OAuth principal for the requested installation before settings are changed.
     const response = await fetch(`https://api.github.com/user/installations/${installationId}`, {
         headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
     });
@@ -188,8 +190,45 @@ app.get("/site.webmanifest", (_req, res) => {
 app.get("/", (_req, res) => {
     res.sendFile(path_1.default.join(__dirname, "..", "index.html"));
 });
-app.get("/details", (_req, res) => {
-    res.sendFile(path_1.default.join(__dirname, "..", "index.html"));
+app.get("/api/runs/:runId", async (req, res) => {
+    const runId = String(req.params.runId || "");
+    if (!(0, runAccess_1.isUuid)(runId))
+        return res.status(404).json({ ok: false, error: "Run not found" });
+    try {
+        const access = await (0, runAccess_1.authorizeRunAccess)(req, runId);
+        if (access.kind === "unauthenticated")
+            return res.status(401).json({ ok: false, error: "GitHub login required" });
+        if (access.kind === "not_found")
+            return res.status(404).json({ ok: false, error: "Run not found" });
+        if (access.kind === "forbidden")
+            return res.status(403).json({ ok: false, error: "Run access is not authorized" });
+        if (!db_1.db)
+            return res.status(503).json({ ok: false, error: "Database unavailable" });
+        const repository = (await db_1.db.select({ fullName: schema_1.repositories.fullName, defaultBranch: schema_1.repositories.defaultBranch })
+            .from(schema_1.repositories).innerJoin(schema_1.scanRuns, (0, drizzle_orm_1.eq)(schema_1.scanRuns.repositoryId, schema_1.repositories.id)).where((0, drizzle_orm_1.eq)(schema_1.scanRuns.id, runId)).limit(1))[0];
+        const reportFindings = await db_1.db.select({
+            id: schema_1.findings.id, severity: schema_1.findings.severity, category: schema_1.findings.category, title: schema_1.findings.title,
+            message: schema_1.findings.message, filePath: schema_1.findings.filePath, lineNumber: schema_1.findings.lineNumber,
+            remediation: schema_1.findings.remediation, status: schema_1.findings.status, createdAt: schema_1.findings.createdAt,
+        }).from(schema_1.findings).where((0, drizzle_orm_1.eq)(schema_1.findings.scanRunId, runId));
+        return res.json({ ok: true, run: {
+                id: access.run.id, scanTimestamp: access.run.completedAt || access.run.startedAt || access.run.createdAt,
+                createdAt: access.run.createdAt, pullRequestNumber: access.run.pullRequestNumber,
+                commitSha: access.run.commitSha, status: access.run.status, verdict: access.run.verdict,
+                findingsCount: access.run.findingsCount, repository: repository?.fullName || null,
+                defaultBranch: repository?.defaultBranch || null,
+                findings: reportFindings,
+            } });
+    }
+    catch (error) {
+        console.error("Run report access failed:", error);
+        return res.status(502).json({ ok: false, error: "Could not load run report" });
+    }
+});
+app.get("/details", (req, res) => {
+    if (!req.query.runId)
+        return res.sendFile(path_1.default.join(__dirname, "..", "index.html"));
+    res.sendFile(path_1.default.join(__dirname, "..", "report.html"));
 });
 app.get("/dashboard", (_req, res) => {
     res.sendFile(path_1.default.join(__dirname, "..", "dashboard.html"));
