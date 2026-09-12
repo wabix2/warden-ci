@@ -39,10 +39,14 @@ function summaryFor(annotations: ScanAnnotation[], filesScanned: number, filesSk
   const secretCount = annotations.filter((a) => a.title === "Possible hardcoded secret").length;
   const pkgCount = annotations.filter((a) => a.title === "Unverified package").length;
   const typosquatCount = annotations.filter((a) => a.title === "Possible typosquat package").length;
+  const confusionCount = annotations.filter((a) => a.title === "Possible dependency-confusion package").length;
+  const takeoverCount = annotations.filter((a) => a.title === "Possible maintainer takeover").length;
   const execCount = annotations.filter((a) => a.title === "Dangerous dynamic execution").length;
   const parts: string[] = [];
   if (secretCount) parts.push(`${secretCount} possible hardcoded secret(s)`);
   if (typosquatCount) parts.push(`${typosquatCount} possible typosquat package(s)`);
+  if (confusionCount) parts.push(`${confusionCount} possible dependency-confusion package(s)`);
+  if (takeoverCount) parts.push(`${takeoverCount} possible maintainer takeover(s)`);
   if (pkgCount) parts.push(`${pkgCount} unverified package import(s)`);
   if (execCount) parts.push(`${execCount} dangerous dynamic execution pattern(s)`);
   return `Found ${parts.join(", ")} across ${filesScanned} scanned file(s).`;

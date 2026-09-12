@@ -62,13 +62,13 @@ the actual attempt at defensibility, in honest current state:
    on for real customers requires `PRIVACY.md`'s telemetry section to
    actually be true first (it's written, but flagged as a TODO pending
    review) — this is a legal gate, not a technical one.
-2. **Typosquat/freshness signal (`riskSignals.ts`)** — catches near-miss
+2. **Package-risk signals (`riskSignals.ts`)** — catches near-miss
    package names published recently, not just nonexistent ones. **Status:
    built and live**, using a daily background refresh from npm's official
    downloads API and pypistats.org. The checked-in lists are bootstrap
    candidates; complete snapshots are ranked to the top 100, cached in Redis,
    and retained in memory when sources fail. The refresh never runs on the PR
-   request path.
+   request path. Public metadata cannot prove a private-name collision: classic dependency confusion requires an organization's internal package list. Warden therefore uses only a narrow high-version/thin-history proxy, and maintainer-change detection is npm-only because PyPI JSON does not expose uploader identity.
 3. **Multi-ecosystem breadth (`ecosystems/`)** — npm and PyPI both work
    today, behind a shared interface designed so a third registry is an
    adapter, not a rewrite. **Status: built and live** for these two;

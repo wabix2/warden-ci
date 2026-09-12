@@ -4,6 +4,18 @@ export interface PackageMetadata {
   existsOnRegistry: boolean;
   /** Days since the package's earliest known release. Undefined if unknown or lookup failed. */
   publishedDaysAgo?: number;
+  /** Latest published semantic version, when the registry exposes one. */
+  latestVersion?: string;
+  /** Number of non-yanked published versions observed in registry metadata. */
+  releaseCount?: number;
+  /** npm publisher identity history; unavailable for PyPI JSON metadata. */
+  publisherHistory?: string[];
+  /** Latest npm publisher, when present in the packument. */
+  latestPublisher?: string;
+  /** Latest npm publisher differs from the preceding observed publisher. */
+  publisherChangedRecently?: boolean;
+  /** Days since the latest release, when known. */
+  latestReleaseDaysAgo?: number;
 }
 
 export interface Ecosystem {
