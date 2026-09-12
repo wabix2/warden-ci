@@ -43,19 +43,16 @@ async function dashboardInstallation(req, installationId) {
     const token = await (0, redis_1.getRedisClient)().get(`warden:oauth:session:${sessionId}`);
     if (!token)
         return null;
-    // Use GitHub's installation-specific user endpoint rather than trusting the
-    // broad /user/installations listing. GitHub must explicitly authorize this
-    // OAuth principal for the requested installation before settings are changed.
-    const response = await fetch(`https://api.github.com/user/installations/${installationId}`, {
-        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
-    });
-    if (response.status === 401)
-        return null;
-    if (response.status === 403 || response.status === 404)
-        return false;
-    if (!response.ok)
-        throw new Error(`GitHub installation authorization failed (${response.status})`);
-    return true;
+    try {
+        return await (0, runAccess_1.authorizeInstallationAccess)(token, installationId, fetch);
+    }
+    catch (error) {
+        if (error.status === 401)
+            return null;
+        if (error.status === 403 || error.status === 404)
+            return false;
+        throw error;
+    }
 }
 // Fail loud at boot, not silently on the first user's request — if this prints on
 // deploy, the waitlist (and Pro-status checks) will fail until it's fixed.
@@ -241,7 +238,7 @@ app.get("/auth/github", (_req, res) => {
     const callback = `${process.env.PUBLIC_BASE_URL || `${_req.protocol}://${_req.get("host")}`}/auth/github/callback`;
     void (0, redis_1.getRedisClient)().set(`warden:oauth:state:${state}`, "1", { ex: 600 });
     res.setHeader("Set-Cookie", `${OAUTH_STATE_COOKIE}=${state}; HttpOnly; SameSite=Lax; Path=/${secureCookie(_req)}`);
-    res.redirect(`https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(callback)}&scope=read:org`);
+    res.redirect(`https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(callback)}&scope=`);
 });
 app.get("/auth/github/callback", async (req, res) => {
     const state = String(req.query.state || "");
