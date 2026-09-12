@@ -18,11 +18,16 @@
  */
 
 import { Request, Response } from "express";
+import { eq } from "drizzle-orm";
 import { getInstallationClient } from "./appAuth";
 import { verifyGithubSignature } from "./verifySignature";
 import { scanFiles, ScanAnnotation } from "../scan";
 import { logCorpusEvent, telemetryEnabled } from "../telemetry/corpusLog";
 import { isProActive } from "../billing/store";
+import { getRedisClient } from "../lib/redis";
+import { evaluateGate } from "../enforcement/policy";
+import { db } from "../db";
+import { scanRuns, findings } from "../db/schema";
 
 const ACTIONABLE_ACTIONS = new Set(["opened", "synchronize", "reopened"]);
 
@@ -88,6 +93,12 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
   res.status(202).send("Accepted");
 
   try {
+    const deliveryId = String(req.headers["x-github-delivery"] || "").trim();
+    if (deliveryId) {
+      const claimed = await getRedisClient().set(`warden:delivery:${deliveryId}`, "1", { nx: true, ex: 86400 });
+      if (claimed !== "OK") return;
+    }
+
     const installationId = payload.installation?.id;
     const owner = payload.repository?.owner?.login;
     const repo = payload.repository?.name;
@@ -100,6 +111,14 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
     }
 
     const octokit = getInstallationClient(installationId);
+    const scanRun = db ? (await db.insert(scanRuns).values({
+      repositoryId: String(payload.repository?.id || installationId) as never,
+      githubDeliveryId: deliveryId || undefined,
+      pullRequestNumber: prNumber,
+      commitSha: headSha,
+      status: "running",
+      startedAt: new Date(),
+    }).returning({ id: scanRuns.id }))[0] : undefined;
 
     // Private-repo scanning is a Pro feature. Public repos always scan free —
     // that's the distribution engine (see README "Pricing"). This is the first
@@ -157,14 +176,33 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
       files.map((f) => ({ filename: f.filename, patch: f.patch }))
     );
 
-    const hasFailure = annotations.some((a) => a.severity === "failure");
+    const gate = evaluateGate(annotations);
+
+    if (db && scanRun) {
+      await db.insert(findings).values(annotations.map((annotation, index) => ({
+        scanRunId: scanRun.id,
+        fingerprint: `${annotation.path}:${annotation.line}:${annotation.title}:${index}`,
+        severity: annotation.severity,
+        category: annotation.title,
+        title: annotation.title,
+        message: annotation.message,
+        filePath: annotation.path,
+        lineNumber: annotation.line,
+      })));
+      await db.update(scanRuns).set({
+        status: "completed",
+        verdict: gate.shouldBlock ? "failure" : "success",
+        findingsCount: annotations.length,
+        completedAt: new Date(),
+      }).where(eq(scanRuns.id, scanRun.id));
+    }
 
     await octokit.checks.update({
       owner,
       repo,
       check_run_id: checkRun.data.id,
       status: "completed",
-      conclusion: hasFailure ? "failure" : annotations.length > 0 ? "neutral" : "success",
+      conclusion: gate.shouldBlock ? "failure" : annotations.length > 0 ? "neutral" : "success",
       output: {
         title: annotations.length === 0 ? "No issues found" : `${annotations.length} finding(s)`,
         summary: summaryFor(annotations, filesScanned, filesSkipped),

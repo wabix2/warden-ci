@@ -59,7 +59,7 @@ const plans = {
   team: {
     name: "Team",
     price: "$49",
-    description: "For engineering teams protecting multiple repositories.",
+    description: "Coming later — organization controls are not available yet.",
     features: [
       "Everything in Pro",
       "Unlimited team members",
@@ -73,7 +73,7 @@ const plans = {
   enterprise: {
     name: "Enterprise",
     price: "$149",
-    description: "For organizations that need security at scale.",
+    description: "Coming later — custom governance is not available yet.",
     features: [
       "Everything in Team",
       "Organization-wide protection",
@@ -107,6 +107,7 @@ app.post(
     const productId = String(req.body?.product_id || "").trim();
     const productMap = Object.fromEntries((Object.keys(plans) as PlanKey[]).map((key) => [plans[key].productId(), key]));
     const plan = productMap[productId] as PlanKey | undefined;
+    if (plan && plan !== "pro") return res.status(400).send("This tier is not available yet");
     if (!saleId || !plan) return res.status(400).send("Unknown product or malformed sale");
 
     const fields = typeof req.body?.custom_fields === "string" ? JSON.parse(req.body.custom_fields) : req.body?.custom_fields || {};
@@ -172,6 +173,10 @@ app.get("/details", (_req: Request, res: Response) => {
   res.sendFile(path.join(__dirname, "..", "index.html"));
 });
 
+app.get("/dashboard", (_req: Request, res: Response) => {
+  res.sendFile(path.join(__dirname, "..", "dashboard.html"));
+});
+
 /**
  * Renders TERMS.md / PRIVACY.md as a plain readable page. These MUST be reachable —
  * Gumroad's domain-approval process requires your site to link through to (or contain)
@@ -225,7 +230,8 @@ app.get("/subscribe", (req: Request, res: Response) => {
   const selectedPlan: PlanKey = requestedPlan in plans ? requestedPlan : "pro";
   const checkoutEnabled = process.env.GUMROAD_CHECKOUT_ENABLED !== "false";
 
-  const planCards = (Object.keys(plans) as PlanKey[])
+  const visiblePlans = (Object.keys(plans) as PlanKey[]).filter((key) => key === "pro" || Boolean(plans[key].checkoutUrl()));
+  const planCards = visiblePlans
     .map((key) => {
       const plan = plans[key];
       const selected = key === selectedPlan;
@@ -262,7 +268,7 @@ app.get("/subscribe", (req: Request, res: Response) => {
     .join("\n");
 
   const configurationWarning =
-    checkoutEnabled && !(Object.keys(plans) as PlanKey[]).every((key) => plans[key].checkoutUrl())
+    checkoutEnabled && !plans.pro.checkoutUrl()
       ? `<div class="warning">Gumroad checkout is not fully configured: add the product checkout URLs to the server environment.</div>`
       : "";
 

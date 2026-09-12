@@ -50,7 +50,9 @@ package names).
 ## Differentiation — the four things meant to make this hard to just copy
 
 A plain "does this package exist" check is trivial to replicate — a
-competitor (or GitHub itself) could ship it in an afternoon. These four are
+competitor (or GitHub itself) could ship it in an afternoon. The product moat
+is the enforcement workflow: deterministic evidence, fail-closed policy, and
+an audit trail that teams can trust during an incident. These four are
 the actual attempt at defensibility, in honest current state:
 
 1. **Detection corpus (`telemetry/corpusLog.ts`)** — every flagged package,
@@ -90,13 +92,12 @@ unenforced; it's enforced now.
 
 Configurable via the `GUMROAD_CHECKOUT_*` and `GUMROAD_PRODUCT_*` env vars — see below. Only
 plans with configured Gumroad values are shown to customers on `/subscribe`.
-Note the gap above: right now every installer gets the same scan regardless
-of plan, since there's no enforcement wired up yet.
+The current paid boundary is intentionally narrow and enforceable. Gumroad Pro is the only sellable paid tier; Team and Enterprise are not advertised as active products:
 
-- **Free**: scanning of public repositories.
-- **Pro**: intended to unlock private repository scanning (not yet enforced).
-- **Team** / **Enterprise**: optional higher tiers — leave their price env
-  vars blank if you're not offering them yet.
+- **Free**: public repository scanning.
+- **Pro**: private repository scanning plus blocking checks.
+- **Team** / **Enterprise**: hidden until their organization controls and audit
+  workflows are implemented; do not sell capabilities that are not live.
 
 ## Setup
 
