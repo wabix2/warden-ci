@@ -6,6 +6,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "test:webhook": "node scripts/test-webhook.mjs",
+    "test:popular": "pnpm build && node --test scripts/test-popular-packages.mjs",
     "warden-scan": "node scripts/warden-scan.mjs"
   },
   "dependencies": {
