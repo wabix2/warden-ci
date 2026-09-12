@@ -1,14 +1,20 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.REQUIRED_REPOSITORY_PERMISSION = void 0;
+exports.REQUIRED_WRITE_PERMISSION = exports.REQUIRED_REPOSITORY_PERMISSION = void 0;
+exports.sessionTokenFromRequest = sessionTokenFromRequest;
 exports.isUuid = isUuid;
 exports.authorizeInstallationRepository = authorizeInstallationRepository;
+exports.authorizeInstallationRepositoryWrite = authorizeInstallationRepositoryWrite;
 exports.authorizeRunAccessWithDependencies = authorizeRunAccessWithDependencies;
 exports.authorizeRunAccess = authorizeRunAccess;
 const drizzle_orm_1 = require("drizzle-orm");
 const db_1 = require("../db");
 const schema_1 = require("../db/schema");
 const redis_1 = require("../lib/redis");
+async function sessionTokenFromRequest(req) {
+    const sessionId = sessionIdFromRequest(req);
+    return sessionId ? (0, redis_1.getRedisClient)().get(`warden:oauth:session:${sessionId}`) : null;
+}
 function sessionIdFromRequest(req) {
     const cookie = req.headers.cookie ?? "";
     return cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith("warden_session="))?.slice("warden_session=".length);
@@ -17,6 +23,7 @@ function isUuid(value) {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 exports.REQUIRED_REPOSITORY_PERMISSION = "pull";
+exports.REQUIRED_WRITE_PERMISSION = "push";
 async function accessibleRepositories(installationId, token, githubFetch) {
     const repositories = [];
     for (let page = 1; page <= 100; page += 1) {
@@ -43,6 +50,12 @@ async function authorizeInstallationRepository(token, installationId, repository
         return "forbidden";
     const repositories = await accessibleRepositories(installationId, token, githubFetch);
     return repositories.some((repository) => repository.id === repositoryId && repository.permissions?.[exports.REQUIRED_REPOSITORY_PERMISSION] === true) ? "authorized" : "forbidden";
+}
+async function authorizeInstallationRepositoryWrite(token, installationId, repositoryId, githubFetch) {
+    if (!Number.isSafeInteger(installationId) || !Number.isSafeInteger(repositoryId) || installationId <= 0 || repositoryId <= 0)
+        return "forbidden";
+    const repositories = await accessibleRepositories(installationId, token, githubFetch);
+    return repositories.some((repository) => repository.id === repositoryId && repository.permissions?.[exports.REQUIRED_REPOSITORY_PERMISSION] === true && repository.permissions?.[exports.REQUIRED_WRITE_PERMISSION] === true) ? "authorized" : "forbidden";
 }
 async function authorizeRunAccessWithDependencies(req, runId, dependencies) {
     const sessionId = sessionIdFromRequest(req);

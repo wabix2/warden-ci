@@ -18,6 +18,10 @@ const redis_1 = require("./lib/redis");
 const popularPackageRefresh_1 = require("./scan/popularPackageRefresh");
 const corpusLog_1 = require("./telemetry/corpusLog");
 const runAccess_1 = require("./auth/runAccess");
+const appAuth_1 = require("./github/appAuth");
+const engine_1 = require("./remediation/engine");
+const github_1 = require("./remediation/github");
+const osv_1 = require("./remediation/osv");
 const app = (0, express_1.default)();
 const PORT = Number(process.env.PORT || 3000);
 const OAUTH_STATE_COOKIE = "warden_oauth_state";
@@ -201,7 +205,7 @@ app.get("/api/runs/:runId", async (req, res) => {
         const reportFindings = await db_1.db.select({
             id: schema_1.findings.id, severity: schema_1.findings.severity, category: schema_1.findings.category, title: schema_1.findings.title,
             message: schema_1.findings.message, filePath: schema_1.findings.filePath, lineNumber: schema_1.findings.lineNumber,
-            remediation: schema_1.findings.remediation, status: schema_1.findings.status, createdAt: schema_1.findings.createdAt,
+            remediation: schema_1.findings.remediation, packageName: schema_1.findings.packageName, ecosystem: schema_1.findings.ecosystem, manifestPath: schema_1.findings.manifestPath, advisoryId: schema_1.findings.advisoryId, affectedRange: schema_1.findings.affectedRange, currentVersion: schema_1.findings.currentVersion, status: schema_1.findings.status, createdAt: schema_1.findings.createdAt,
         }).from(schema_1.findings).where((0, drizzle_orm_1.eq)(schema_1.findings.scanRunId, runId));
         return res.json({ ok: true, run: {
                 id: access.run.id, scanTimestamp: access.run.completedAt || access.run.startedAt || access.run.createdAt,
@@ -215,6 +219,68 @@ app.get("/api/runs/:runId", async (req, res) => {
     catch (error) {
         console.error("Run report access failed:", error);
         return res.status(502).json({ ok: false, error: "Could not load run report" });
+    }
+});
+app.post("/api/runs/:runId/findings/:findingId/fix", async (req, res) => {
+    const runId = String(req.params.runId || "");
+    const findingId = String(req.params.findingId || "");
+    if (!(0, runAccess_1.isUuid)(runId) || !(0, runAccess_1.isUuid)(findingId))
+        return res.status(404).json({ ok: false, error: "Finding not found" });
+    try {
+        const access = await (0, runAccess_1.authorizeRunAccess)(req, runId);
+        if (access.kind === "unauthenticated")
+            return res.status(401).json({ ok: false, error: "GitHub login required" });
+        if (access.kind === "not_found")
+            return res.status(404).json({ ok: false, error: "Run not found" });
+        if (access.kind === "forbidden")
+            return res.status(403).json({ ok: false, error: "Remediation is not authorized" });
+        if (!db_1.db)
+            return res.status(503).json({ ok: false, error: "Database unavailable" });
+        const row = (await db_1.db.select({ finding: schema_1.findings, repository: schema_1.repositories, installation: schema_1.installations }).from(schema_1.findings).innerJoin(schema_1.scanRuns, (0, drizzle_orm_1.eq)(schema_1.findings.scanRunId, schema_1.scanRuns.id)).innerJoin(schema_1.repositories, (0, drizzle_orm_1.eq)(schema_1.scanRuns.repositoryId, schema_1.repositories.id)).innerJoin(schema_1.installations, (0, drizzle_orm_1.eq)(schema_1.repositories.installationId, schema_1.installations.id)).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.findings.id, findingId), (0, drizzle_orm_1.eq)(schema_1.findings.scanRunId, runId))).limit(1))[0];
+        if (!row)
+            return res.status(404).json({ ok: false, error: "Finding not found" });
+        const finding = row.finding;
+        if (!finding.packageName || !finding.ecosystem || !finding.currentVersion || !finding.manifestPath)
+            return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "Finding metadata is insufficient for safe remediation" });
+        const ecosystem = finding.ecosystem === "pypi" ? "python" : finding.ecosystem === "npm" ? "npm" : null;
+        if (!ecosystem)
+            return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "Unsupported remediation ecosystem" });
+        const userToken = await (0, runAccess_1.sessionTokenFromRequest)(req);
+        if (!userToken)
+            return res.status(401).json({ ok: false, error: "GitHub login required" });
+        const writeAccess = await (0, runAccess_1.authorizeInstallationRepositoryWrite)(userToken, row.installation.githubInstallationId, row.repository.githubRepositoryId, fetch);
+        if (writeAccess !== "authorized")
+            return res.status(403).json({ ok: false, status: "permission_required", error: "GitHub repository write permission is required" });
+        const advisory = await (0, osv_1.resolveOsvAdvisory)(ecosystem, finding.packageName, finding.currentVersion);
+        if (!advisory?.fixedVersion)
+            return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "OSV did not provide enough data for a safe target" });
+        const existing = (await db_1.db.select().from(schema_1.remediations).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.remediations.findingId, findingId), (0, drizzle_orm_1.eq)(schema_1.remediations.targetVersion, advisory.fixedVersion))).limit(1))[0];
+        if (existing?.pullRequestUrl && existing.pullRequestNumber)
+            return res.json({ ok: true, status: "already_has_remediation_pr", pullRequestUrl: existing.pullRequestUrl, pullRequestNumber: existing.pullRequestNumber });
+        const octokit = (0, appAuth_1.getInstallationClient)(row.installation.githubInstallationId);
+        const [owner, repo] = row.repository.fullName.split("/");
+        if (!owner || !repo)
+            return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "Repository identity is invalid" });
+        const base = await octokit.repos.getBranch({ owner, repo, branch: row.repository.defaultBranch });
+        const file = await octokit.repos.getContent({ owner, repo, path: finding.manifestPath, ref: base.data.commit.sha });
+        if (Array.isArray(file.data) || !("content" in file.data))
+            return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "Supported manifest was not found" });
+        const before = Buffer.from(file.data.content, "base64").toString("utf8");
+        const result = (0, engine_1.applyDependencyRemediation)({ ecosystem, packageName: finding.packageName, vulnerableRange: advisory.affectedRange, targetVersion: advisory.fixedVersion, manifestPath: finding.manifestPath, manifestContent: before });
+        if (!(0, engine_1.manifestDiffIsScoped)(before, result.manifestContent, finding.packageName))
+            return res.status(409).json({ ok: false, status: "verification_failed", error: "Remediation changed more than the intended dependency" });
+        const remediation = await db_1.db.insert(schema_1.remediations).values({ findingId, installationId: row.repository.installationId, repositoryId: row.repository.id, packageName: finding.packageName, targetVersion: advisory.fixedVersion, status: "creating" }).onConflictDoNothing().returning({ id: schema_1.remediations.id });
+        const created = remediation[0];
+        const pr = await (0, github_1.createRemediationPullRequest)(octokit, { owner, repo, baseBranch: row.repository.defaultBranch, baseSha: base.data.commit.sha, runId, findingId, reportUrl: `${process.env.PUBLIC_BASE_URL || ""}/details?runId=${runId}`, advisoryId: advisory.id, result });
+        const verification = await (0, osv_1.resolveOsvAdvisory)(ecosystem, finding.packageName, advisory.fixedVersion);
+        const verificationStatus = verification ? "verification_failed" : "verified_fixed";
+        const remediationStatus = verification ? "verification_failed" : "verified_fixed";
+        await db_1.db.update(schema_1.remediations).set({ status: remediationStatus, branchName: pr.branch, pullRequestNumber: pr.pullRequestNumber, pullRequestUrl: pr.pullRequestUrl, verificationStatus, updatedAt: new Date() }).where(created ? (0, drizzle_orm_1.eq)(schema_1.remediations.id, created.id) : (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.remediations.findingId, findingId), (0, drizzle_orm_1.eq)(schema_1.remediations.targetVersion, advisory.fixedVersion)));
+        return res.status(201).json({ ok: true, status: remediationStatus, pullRequestUrl: pr.pullRequestUrl, pullRequestNumber: pr.pullRequestNumber });
+    }
+    catch (error) {
+        console.error("Remediation request failed:", error);
+        return res.status(502).json({ ok: false, error: "Could not evaluate remediation request" });
     }
 });
 app.get("/details", (req, res) => {

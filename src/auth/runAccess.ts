@@ -10,6 +10,11 @@ export type RunAccessResult =
   | { kind: "forbidden" }
   | { kind: "authorized"; run: typeof scanRuns.$inferSelect; installationId: number };
 
+export async function sessionTokenFromRequest(req: Request): Promise<string | null> {
+  const sessionId = sessionIdFromRequest(req);
+  return sessionId ? getRedisClient().get<string>(`warden:oauth:session:${sessionId}`) : null;
+}
+
 function sessionIdFromRequest(req: Request): string | undefined {
   const cookie = req.headers.cookie ?? "";
   return cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith("warden_session="))?.slice("warden_session=".length);
@@ -20,6 +25,7 @@ export function isUuid(value: string): boolean {
 }
 
 export const REQUIRED_REPOSITORY_PERMISSION = "pull" as const;
+export const REQUIRED_WRITE_PERMISSION = "push" as const;
 
 type AuthorizationDependencies = {
   database: any;
@@ -53,6 +59,12 @@ export async function authorizeInstallationRepository(token: string, installatio
   if (!Number.isSafeInteger(installationId) || !Number.isSafeInteger(repositoryId) || installationId <= 0 || repositoryId <= 0) return "forbidden";
   const repositories = await accessibleRepositories(installationId, token, githubFetch);
   return repositories.some((repository) => repository.id === repositoryId && repository.permissions?.[REQUIRED_REPOSITORY_PERMISSION] === true) ? "authorized" : "forbidden";
+}
+
+export async function authorizeInstallationRepositoryWrite(token: string, installationId: number, repositoryId: number, githubFetch: typeof fetch): Promise<"authorized" | "forbidden"> {
+  if (!Number.isSafeInteger(installationId) || !Number.isSafeInteger(repositoryId) || installationId <= 0 || repositoryId <= 0) return "forbidden";
+  const repositories = await accessibleRepositories(installationId, token, githubFetch);
+  return repositories.some((repository) => repository.id === repositoryId && repository.permissions?.[REQUIRED_REPOSITORY_PERMISSION] === true && repository.permissions?.[REQUIRED_WRITE_PERMISSION] === true) ? "authorized" : "forbidden";
 }
 
 export async function authorizeRunAccessWithDependencies(req: Request, runId: string, dependencies: AuthorizationDependencies): Promise<RunAccessResult> {

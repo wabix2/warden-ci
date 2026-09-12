@@ -2,17 +2,21 @@ import express, { Request, Response } from "express";
 import path from "path";
 import { readFileSync } from "fs";
 import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { setProStatus, getOwnerForSale, addToWaitlist, getWaitlist } from "./billing/store";
 import { scanFiles, ScannedFile } from "./scan";
 import { defaultScanPolicy, evaluatePolicy, toCycloneDx, toSarif, redact } from "./scan/enterprise";
 import { db } from "./db";
-import { repositories, scanRuns, findings, auditEvents } from "./db/schema";
+import { repositories, scanRuns, findings, auditEvents, installations, remediations } from "./db/schema";
 import { handlePullRequestWebhook } from "./github/webhookHandler";
 import { getRedisClient } from "./lib/redis";
 import { schedulePopularPackageRefresh } from "./scan/popularPackageRefresh";
 import { setInstallationCorpusOptOut, setPrivateCorpusOptIn } from "./telemetry/corpusLog";
-import { authorizeRunAccess, isUuid } from "./auth/runAccess";
+import { authorizeInstallationRepositoryWrite, authorizeRunAccess, isUuid, sessionTokenFromRequest } from "./auth/runAccess";
+import { getInstallationClient } from "./github/appAuth";
+import { applyDependencyRemediation, manifestDiffIsScoped } from "./remediation/engine";
+import { createRemediationPullRequest } from "./remediation/github";
+import { resolveOsvAdvisory } from "./remediation/osv";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -223,7 +227,7 @@ app.get("/api/runs/:runId", async (req: Request, res: Response) => {
     const reportFindings = await db.select({
       id: findings.id, severity: findings.severity, category: findings.category, title: findings.title,
       message: findings.message, filePath: findings.filePath, lineNumber: findings.lineNumber,
-      remediation: findings.remediation, status: findings.status, createdAt: findings.createdAt,
+      remediation: findings.remediation, packageName: findings.packageName, ecosystem: findings.ecosystem, manifestPath: findings.manifestPath, advisoryId: findings.advisoryId, affectedRange: findings.affectedRange, currentVersion: findings.currentVersion, status: findings.status, createdAt: findings.createdAt,
     }).from(findings).where(eq(findings.scanRunId, runId));
     return res.json({ ok: true, run: {
       id: access.run.id, scanTimestamp: access.run.completedAt || access.run.startedAt || access.run.createdAt,
@@ -236,6 +240,53 @@ app.get("/api/runs/:runId", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Run report access failed:", error);
     return res.status(502).json({ ok: false, error: "Could not load run report" });
+  }
+});
+
+app.post("/api/runs/:runId/findings/:findingId/fix", async (req: Request, res: Response) => {
+  const runId = String(req.params.runId || "");
+  const findingId = String(req.params.findingId || "");
+  if (!isUuid(runId) || !isUuid(findingId)) return res.status(404).json({ ok: false, error: "Finding not found" });
+  try {
+    const access = await authorizeRunAccess(req, runId);
+    if (access.kind === "unauthenticated") return res.status(401).json({ ok: false, error: "GitHub login required" });
+    if (access.kind === "not_found") return res.status(404).json({ ok: false, error: "Run not found" });
+    if (access.kind === "forbidden") return res.status(403).json({ ok: false, error: "Remediation is not authorized" });
+    if (!db) return res.status(503).json({ ok: false, error: "Database unavailable" });
+    const row = (await db.select({ finding: findings, repository: repositories, installation: installations }).from(findings).innerJoin(scanRuns, eq(findings.scanRunId, scanRuns.id)).innerJoin(repositories, eq(scanRuns.repositoryId, repositories.id)).innerJoin(installations, eq(repositories.installationId, installations.id)).where(and(eq(findings.id, findingId), eq(findings.scanRunId, runId))).limit(1))[0];
+    if (!row) return res.status(404).json({ ok: false, error: "Finding not found" });
+    const finding = row.finding;
+    if (!finding.packageName || !finding.ecosystem || !finding.currentVersion || !finding.manifestPath) return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "Finding metadata is insufficient for safe remediation" });
+    const ecosystem = finding.ecosystem === "pypi" ? "python" : finding.ecosystem === "npm" ? "npm" : null;
+    if (!ecosystem) return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "Unsupported remediation ecosystem" });
+    const userToken = await sessionTokenFromRequest(req);
+    if (!userToken) return res.status(401).json({ ok: false, error: "GitHub login required" });
+    const writeAccess = await authorizeInstallationRepositoryWrite(userToken, row.installation.githubInstallationId, row.repository.githubRepositoryId, fetch);
+    if (writeAccess !== "authorized") return res.status(403).json({ ok: false, status: "permission_required", error: "GitHub repository write permission is required" });
+    const advisory = await resolveOsvAdvisory(ecosystem, finding.packageName, finding.currentVersion);
+    if (!advisory?.fixedVersion) return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "OSV did not provide enough data for a safe target" });
+    const existing = (await db.select().from(remediations).where(and(eq(remediations.findingId, findingId), eq(remediations.targetVersion, advisory.fixedVersion))).limit(1))[0];
+    if (existing?.pullRequestUrl && existing.pullRequestNumber) return res.json({ ok: true, status: "already_has_remediation_pr", pullRequestUrl: existing.pullRequestUrl, pullRequestNumber: existing.pullRequestNumber });
+    const octokit = getInstallationClient(row.installation.githubInstallationId);
+    const [owner, repo] = row.repository.fullName.split("/");
+    if (!owner || !repo) return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "Repository identity is invalid" });
+    const base = await octokit.repos.getBranch({ owner, repo, branch: row.repository.defaultBranch });
+    const file = await octokit.repos.getContent({ owner, repo, path: finding.manifestPath, ref: base.data.commit.sha });
+    if (Array.isArray(file.data) || !("content" in file.data)) return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "Supported manifest was not found" });
+    const before = Buffer.from(file.data.content, "base64").toString("utf8");
+    const result = applyDependencyRemediation({ ecosystem, packageName: finding.packageName, vulnerableRange: advisory.affectedRange, targetVersion: advisory.fixedVersion, manifestPath: finding.manifestPath, manifestContent: before });
+    if (!manifestDiffIsScoped(before, result.manifestContent, finding.packageName)) return res.status(409).json({ ok: false, status: "verification_failed", error: "Remediation changed more than the intended dependency" });
+    const remediation = await db.insert(remediations).values({ findingId, installationId: row.repository.installationId, repositoryId: row.repository.id, packageName: finding.packageName, targetVersion: advisory.fixedVersion, status: "creating" }).onConflictDoNothing().returning({ id: remediations.id });
+    const created = remediation[0];
+    const pr = await createRemediationPullRequest(octokit, { owner, repo, baseBranch: row.repository.defaultBranch, baseSha: base.data.commit.sha, runId, findingId, reportUrl: `${process.env.PUBLIC_BASE_URL || ""}/details?runId=${runId}`, advisoryId: advisory.id, result });
+    const verification = await resolveOsvAdvisory(ecosystem, finding.packageName, advisory.fixedVersion);
+    const verificationStatus = verification ? "verification_failed" : "verified_fixed";
+    const remediationStatus = verification ? "verification_failed" : "verified_fixed";
+    await db.update(remediations).set({ status: remediationStatus, branchName: pr.branch, pullRequestNumber: pr.pullRequestNumber, pullRequestUrl: pr.pullRequestUrl, verificationStatus, updatedAt: new Date() }).where(created ? eq(remediations.id, created.id) : and(eq(remediations.findingId, findingId), eq(remediations.targetVersion, advisory.fixedVersion)));
+    return res.status(201).json({ ok: true, status: remediationStatus, pullRequestUrl: pr.pullRequestUrl, pullRequestNumber: pr.pullRequestNumber });
+  } catch (error) {
+    console.error("Remediation request failed:", error);
+    return res.status(502).json({ ok: false, error: "Could not evaluate remediation request" });
   }
 });
 

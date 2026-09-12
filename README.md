@@ -85,7 +85,7 @@ the actual attempt at defensibility, in honest current state:
 
 ## Not yet built
 
-Beyond what's noted above: no `/fix` auto-remediation and no `issue_comment`
+Beyond what's noted above: no production `/fix` auto-remediation; a side-effect-free deterministic engine prototype exists for npm `package.json` and Python `requirements.txt`, but it is not exposed until GitHub write authorization, branch/commit/PR operations, persistence, and verification are implemented and no `issue_comment`
 handling. `/details?runId=...` is now an authenticated per-run security report. The
 server uses GitHub's documented `GET /user/installations/{installation_id}/repositories`
 endpoint with the OAuth user's token and authorizes only when the exact repository
