@@ -27,4 +27,7 @@ export const policyVersions = pgTable("warden_policy_versions", {
 export const suppressions = pgTable("warden_suppressions", {
   id: uuid("id").defaultRandom().primaryKey(), installationId: uuid("installation_id").notNull(), fingerprint: text("fingerprint").notNull(), reason: text("reason").notNull(), expiresAt: timestamp("expires_at", { withTimezone: true }), createdBy: text("created_by").notNull(), createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({ uniqueSuppression: unique().on(table.installationId, table.fingerprint) }));
-export const schema = { installations, repositories, policies, entitlements, scanRuns, findings, auditEvents, policyVersions, suppressions };
+export const remediations = pgTable("warden_remediations", {
+  id: uuid("id").defaultRandom().primaryKey(), findingId: uuid("finding_id").notNull(), installationId: uuid("installation_id").notNull(), repositoryId: uuid("repository_id").notNull(), packageName: text("package_name").notNull(), targetVersion: text("target_version").notNull(), status: text("status").notNull().default("requested"), branchName: text("branch_name"), pullRequestNumber: integer("pull_request_number"), pullRequestUrl: text("pull_request_url"), verificationStatus: text("verification_status"), createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(), updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({ uniqueTarget: unique().on(table.installationId, table.repositoryId, table.findingId, table.targetVersion) }));
+export const schema = { installations, repositories, policies, entitlements, scanRuns, findings, auditEvents, policyVersions, suppressions, remediations };

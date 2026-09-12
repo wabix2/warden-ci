@@ -13,7 +13,8 @@
     "warden-scan": "node scripts/warden-scan.mjs",
     "db:ownership:report": "node scripts/backfill-run-ownership.mjs",
     "db:ownership:apply": "node scripts/backfill-run-ownership.mjs --apply",
-    "test:ownership-backfill": "node --test scripts/test-ownership-backfill.mjs"
+    "test:ownership-backfill": "node --test scripts/test-ownership-backfill.mjs",
+    "test:remediation": "pnpm build && node --test scripts/test-remediation-engine.mjs"
   },
   "dependencies": {
     "@octokit/auth-app": "^7.2.2",
@@ -21,12 +22,14 @@
     "@upstash/redis": "^1.38.4",
     "drizzle-orm": "^0.45.2",
     "express": "^4.22.2",
-    "pg": "^8.23.0"
+    "pg": "^8.23.0",
+    "semver": "^7.8.5"
   },
   "devDependencies": {
     "@types/express": "^4.17.25",
     "@types/node": "^20.19.43",
     "@types/pg": "^8.23.1",
+    "@types/semver": "^7.8.0",
     "typescript": "^5.7.3"
   }
 }
