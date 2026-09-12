@@ -10,6 +10,11 @@ export type RunAccessResult =
   | { kind: "forbidden" }
   | { kind: "authorized"; run: typeof scanRuns.$inferSelect; installationId: number };
 
+export async function sessionTokenFromRequest(req: Request): Promise<string | null> {
+  const sessionId = sessionIdFromRequest(req);
+  return sessionId ? getRedisClient().get<string>(`warden:oauth:session:${sessionId}`) : null;
+}
+
 function sessionIdFromRequest(req: Request): string | undefined {
   const cookie = req.headers.cookie ?? "";
   return cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith("warden_session="))?.slice("warden_session=".length);

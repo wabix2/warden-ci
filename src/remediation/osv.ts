@@ -17,8 +17,11 @@ export async function resolveOsvAdvisory(ecosystem: "npm" | "python", packageNam
   for (const vulnerability of body.vulns || []) {
     for (const affected of vulnerability.affected || []) {
       if (affected.package?.name !== packageName) continue;
-      const fixedVersion = affected.ranges?.flatMap((range) => range.events || []).find((event) => event.fixed)?.fixed;
-      if (vulnerability.id && fixedVersion) return { id: vulnerability.id, packageName, ecosystem: queryEcosystem, affectedRange: "OSV advisory range", fixedVersion, severity: vulnerability.severity?.[0]?.score };
+      const events = affected.ranges?.flatMap((range) => range.events || []) || [];
+      const fixedEvent = events.find((event) => event.fixed);
+      const fixedVersion = fixedEvent?.fixed;
+      const affectedRange = fixedVersion ? `<${fixedVersion}` : undefined;
+      if (vulnerability.id && fixedVersion && affectedRange) return { id: vulnerability.id, packageName, ecosystem: queryEcosystem, affectedRange, fixedVersion, severity: vulnerability.severity?.[0]?.score };
     }
   }
   return null;

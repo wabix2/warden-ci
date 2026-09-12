@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.REQUIRED_WRITE_PERMISSION = exports.REQUIRED_REPOSITORY_PERMISSION = void 0;
+exports.sessionTokenFromRequest = sessionTokenFromRequest;
 exports.isUuid = isUuid;
 exports.authorizeInstallationRepository = authorizeInstallationRepository;
 exports.authorizeInstallationRepositoryWrite = authorizeInstallationRepositoryWrite;
@@ -10,6 +11,10 @@ const drizzle_orm_1 = require("drizzle-orm");
 const db_1 = require("../db");
 const schema_1 = require("../db/schema");
 const redis_1 = require("../lib/redis");
+async function sessionTokenFromRequest(req) {
+    const sessionId = sessionIdFromRequest(req);
+    return sessionId ? (0, redis_1.getRedisClient)().get(`warden:oauth:session:${sessionId}`) : null;
+}
 function sessionIdFromRequest(req) {
     const cookie = req.headers.cookie ?? "";
     return cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith("warden_session="))?.slice("warden_session=".length);
