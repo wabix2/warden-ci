@@ -7,14 +7,14 @@ supplements our [Terms of Service](/terms).
 
 ## 1. Merchant of Record
 
-All payments for Warden CI are processed by Paddle.com, acting as Merchant of
-Record. Refunds are issued through Paddle in accordance with
-[Paddle's Buyer Terms](https://www.paddle.com/legal/checkout-buyer-terms).
+All payments for Warden CI are processed by Gumroad.com, acting as Merchant of
+Record. Refunds are issued through Gumroad in accordance with
+[Gumroad's Buyer Terms](https://gumroad.com/terms).
 
 ## 2. 14-day satisfaction guarantee
 
 If you're not satisfied within the first 14 days of starting a paid plan,
-contact us at the email below and we'll issue a full refund via Paddle, no
+contact us at the email below and we'll issue a full refund via Gumroad, no
 questions asked.
 
 ## 3. After the first 14 days
@@ -27,7 +27,7 @@ features until the end of the period you already paid for.
 ## 4. How to request a refund
 
 Email us at wabitafese9@gmail.com with the GitHub account or organization
-name on the subscription. We'll process eligible refunds through Paddle,
+name on the subscription. We'll process eligible refunds through Gumroad,
 typically within a few business days.
 
 ## 5. Contact

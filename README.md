@@ -11,7 +11,7 @@ package names).
 ## How it works
 
 - **`src/server.ts`** — the Express server. Serves the landing page, the
-  Paddle-billed `/subscribe` flow and its webhook (`/billing/webhook`), and
+  Gumroad-billed `/subscribe` flow and its webhook (`/billing/webhook`), and
   registers the GitHub webhook route (`/api/github/webhooks`).
 - **`src/github/webhookHandler.ts`** — receives `pull_request` webhook events
   (`opened`, `synchronize`, `reopened`), verifies the GitHub signature, lists
@@ -88,8 +88,8 @@ unenforced; it's enforced now.
 
 ## Pricing
 
-Configurable via which `PADDLE_PRICE_*` env vars you set — see below. Only
-plans with a configured Price ID are shown to customers on `/subscribe`.
+Configurable via the `GUMROAD_CHECKOUT_*` and `GUMROAD_PRODUCT_*` env vars — see below. Only
+plans with configured Gumroad values are shown to customers on `/subscribe`.
 Note the gap above: right now every installer gets the same scan regardless
 of plan, since there's no enforcement wired up yet.
 
@@ -106,7 +106,7 @@ cp .env.example .env
 ```
 
 Fill in `.env` — see the comments in `.env.example` for where each value comes
-from. For the Paddle side specifically, follow [`BILLING_SETUP.md`](./BILLING_SETUP.md)
+from. For the Gumroad side specifically, follow [`BILLING_SETUP.md`](./BILLING_SETUP.md)
 step by step.
 
 ### GitHub App setup (required for scanning to work at all)
@@ -148,16 +148,11 @@ whether it's time to move to a paid instance.
 
 ## Before going live — checklist
 
-- [ ] `PADDLE_ENVIRONMENT=production` set, **and** `PADDLE_CLIENT_TOKEN`,
-      `PADDLE_API_KEY`, `PADDLE_WEBHOOK_SECRET`, and every `PADDLE_PRICE_*`
-      you use are the **live** values from Paddle, not sandbox ones. A mix of
-      sandbox/production credentials is the most common cause of a generic
-      "something went wrong" error from Paddle's checkout.
-- [ ] Your production domain is added and approved in Paddle's dashboard
-      (Paddle requires this before checkout will work in production mode).
-- [ ] A **separate** webhook destination is configured in Paddle for
-      production (sandbox and production webhooks are configured separately —
-      confirm the production one points at your real deployed URL).
+- [ ] All `GUMROAD_CHECKOUT_*` and `GUMROAD_PRODUCT_*` values are configured.
+- [ ] `GUMROAD_WEBHOOK_SECRET` is configured and Gumroad pings
+      `https://<your-deployed-domain>/billing/webhook`.
+- [ ] Gumroad products and recurring billing settings are live and reviewed.
+
 - [ ] `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` are set — without
       these, Pro status won't persist at all.
 - [ ] Fill in the `[DATE]`, `[YOUR COMPANY/NAME]`, and `[YOUR SUPPORT EMAIL]`
@@ -165,5 +160,5 @@ whether it's time to move to a paid instance.
       — don't launch with placeholder legal text.
 - [ ] Test the full paid flow once in sandbox mode before flipping to
       production: private repo → PR → upgrade link → checkout → webhook
-      received (check Render logs for `[billing] received Paddle webhook`) →
+      received (check Render logs for `[billing] received Gumroad webhook`) →
       re-sync the PR → scan runs instead of showing the upgrade gate.

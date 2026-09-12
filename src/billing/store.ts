@@ -22,25 +22,34 @@ function ownerKey(owner: string): string {
   return `warden:pro:${owner.toLowerCase()}`;
 }
 
-function customerKey(customerId: string): string {
-  return `warden:customer:${customerId}`;
+function saleKey(saleId: string): string {
+  return `warden:sale:${saleId}`;
 }
 
 export interface ProRecord {
   owner: string;
   plan: string; // "pro" | "team" | "enterprise"
-  paddleCustomerId?: string;
-  paddleSubscriptionId?: string;
-  status: string; // mirrors Paddle's subscription status
+  gumroadProductId?: string;
+  gumroadSaleId?: string;
+  gumroadSubscriptionId?: string;
+  status: "active" | "trialing" | "canceled" | "refunded" | "paused";
+  refundedAt?: string;
+  canceledAt?: string;
   updatedAt: string;
 }
 
 export async function setProStatus(record: ProRecord): Promise<void> {
   const redis = getClient();
   await redis.set(ownerKey(record.owner), record);
-  if (record.paddleCustomerId) {
-    await redis.set(customerKey(record.paddleCustomerId), record.owner);
+  if (record.gumroadSaleId) {
+    await redis.set(saleKey(record.gumroadSaleId), record.owner);
   }
+}
+
+export async function getOwnerForSale(saleId: string): Promise<string | null> {
+  const redis = getClient();
+  const owner = await redis.get<string>(saleKey(saleId));
+  return owner ?? null;
 }
 
 export async function getProRecord(owner: string): Promise<ProRecord | null> {
@@ -55,13 +64,7 @@ export async function isProActive(owner: string): Promise<boolean> {
   return record.status === "active" || record.status === "trialing";
 }
 
-export async function getOwnerForCustomer(customerId: string): Promise<string | null> {
-  const redis = getClient();
-  const owner = await redis.get<string>(customerKey(customerId));
-  return owner ?? null;
-}
-
-// --- Waitlist (used while PADDLE_CHECKOUT_ENABLED=false, e.g. mid domain-approval) ---
+// --- Waitlist (used while GUMROAD_CHECKOUT_ENABLED=false, e.g. during product setup) ---
 
 export interface WaitlistEntry {
   email: string;
@@ -83,5 +86,5 @@ export async function getWaitlist(): Promise<WaitlistEntry[]> {
   const redis = getClient();
   const all = await redis.hgetall<Record<string, string>>(WAITLIST_KEY);
   if (!all) return [];
-  return Object.values(all).map((raw) => JSON.parse(raw) as WaitlistEntry);
+  return Object.values(all as Record<string, string>).map((raw) => JSON.parse(raw) as WaitlistEntry);
 }

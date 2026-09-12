@@ -16,15 +16,15 @@ GitHub Check on the pull request. It does not block merges by default.
 - **Free plan**: scanning of public repositories, unlimited.
 - **Pro plan**: $19/month per GitHub account or organization, flat rate,
   unlocks scanning of private repositories. Includes a 14-day free trial.
-  Billed via Paddle, our Merchant of Record. Cancel any time; access continues until the end of the
+  Billed via Gumroad, our Merchant of Record. Cancel any time; access continues until the end of the
   current billing period.
 - **Team plan**: $49/month, for engineering teams protecting multiple repositories.
   Includes everything in Pro plus unlimited team members, team-wide repository
-  protection, and priority support. Billed via Paddle. Cancel any time; access
+  protection, and priority support. Billed via Gumroad. Cancel any time; access
   continues until the end of the current billing period.
 - **Enterprise plan**: $149/month, for organizations that need security at
   scale. Includes everything in Team plus organization-wide protection,
-  advanced controls, and custom security requirements. Billed via Paddle.
+  advanced controls, and custom security requirements. Billed via Gumroad.
 
 ## 3. What we access and store
 
@@ -57,10 +57,10 @@ communicated via email.
 ## 8. Refund policy
 
 See our full [Refund Policy](/refund). In summary: refunds are handled by
-Paddle, our Merchant of Record, in accordance with
-[Paddle's Buyer Terms](https://www.paddle.com/legal/checkout-buyer-terms). If
+Gumroad, our Merchant of Record, in accordance with
+[Gumroad's Buyer Terms](https://gumroad.com/terms). If
 you're not satisfied within the first 14 days of a paid plan, contact us at
-the email below and we'll issue a full refund via Paddle, no questions asked.
+the email below and we'll issue a full refund via Gumroad, no questions asked.
 After 14 days, refunds for partial billing periods are considered on a
 case-by-case basis — cancelling a subscription stops future billing but does
 not itself refund the current period.

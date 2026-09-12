@@ -1,8 +1,8 @@
 import express, { Request, Response } from "express";
 import path from "path";
 import { readFileSync } from "fs";
-import { Environment, Paddle } from "@paddle/paddle-node-sdk";
-import { setProStatus, getOwnerForCustomer, addToWaitlist, getWaitlist } from "./billing/store";
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { setProStatus, getOwnerForSale, addToWaitlist, getWaitlist } from "./billing/store";
 import { handlePullRequestWebhook } from "./github/webhookHandler";
 
 const app = express();
@@ -27,14 +27,6 @@ if (
       "PR scanning will not work until these are set. This is the core product; billing without a working scanner has nothing to sell."
   );
 }
-
-const paddleEnvironment =
-  process.env.PADDLE_ENVIRONMENT === "production"
-    ? Environment.production
-    : Environment.sandbox;
-const paddle = new Paddle(process.env.PADDLE_API_KEY || "", {
-  environment: paddleEnvironment,
-});
 
 function escapeHtml(value: string): string {
   return value
@@ -61,7 +53,8 @@ const plans = {
       "Line-level GitHub results",
       "Automated remediation",
     ],
-    priceId: () => process.env.PADDLE_PRICE_PRO || "",
+    checkoutUrl: () => process.env.GUMROAD_CHECKOUT_PRO || "",
+    productId: () => process.env.GUMROAD_PRODUCT_PRO || "",
   },
   team: {
     name: "Team",
@@ -74,7 +67,8 @@ const plans = {
       "Centralized security visibility",
       "Priority support",
     ],
-    priceId: () => process.env.PADDLE_PRICE_TEAM || "",
+    checkoutUrl: () => process.env.GUMROAD_CHECKOUT_TEAM || "",
+    productId: () => process.env.GUMROAD_PRODUCT_TEAM || "",
   },
   enterprise: {
     name: "Enterprise",
@@ -87,85 +81,59 @@ const plans = {
       "Enterprise support",
       "Custom security requirements",
     ],
-    priceId: () => process.env.PADDLE_PRICE_ENTERPRISE || "",
+    checkoutUrl: () => process.env.GUMROAD_CHECKOUT_ENTERPRISE || "",
+    productId: () => process.env.GUMROAD_PRODUCT_ENTERPRISE || "",
   },
 } as const;
 
 type PlanKey = keyof typeof plans;
 
-// Paddle webhook MUST receive the raw request body for signature verification.
+// Gumroad sends form-encoded ping notifications. Keep this route before express.json().
 app.post(
   "/billing/webhook",
-  express.raw({ type: "application/json" }),
+  express.urlencoded({ extended: false }),
   async (req: Request, res: Response) => {
-    const signature = (req.headers["paddle-signature"] as string) || "";
-    const secret = process.env.PADDLE_WEBHOOK_SECRET || "";
+    const secret = process.env.GUMROAD_WEBHOOK_SECRET || "";
+    if (!secret) return res.status(500).send("Webhook is not configured");
 
-    if (!secret) {
-      console.error("PADDLE_WEBHOOK_SECRET is not configured");
-      return res.status(500).send("Webhook is not configured");
+    const provided = String(req.body?.license_key || req.body?.custom_fields || "");
+    const expected = createHmac("sha256", secret).update(provided).digest("hex");
+    const signature = String(req.headers["x-gumroad-signature"] || req.body?.signature || "");
+    if (!signature || signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+      return res.status(401).send("Invalid signature");
     }
 
-    try {
-      const rawBody = Buffer.isBuffer(req.body)
-        ? req.body.toString("utf8")
-        : String(req.body ?? "");
-      const eventData = await paddle.webhooks.unmarshal(
-        rawBody,
-        secret,
-        signature,
-      );
-      console.log("Webhook received:", eventData.eventType);
+    const saleId = String(req.body?.sale_id || req.body?.id || "").trim();
+    const productId = String(req.body?.product_id || "").trim();
+    const productMap = Object.fromEntries((Object.keys(plans) as PlanKey[]).map((key) => [plans[key].productId(), key]));
+    const plan = productMap[productId] as PlanKey | undefined;
+    if (!saleId || !plan) return res.status(400).send("Unknown product or malformed sale");
 
-      // Persist subscription state so a completed checkout actually grants access —
-      // previously this handler verified the signature and logged the event type but
-      // never wrote anything to the billing store, so paying customers never got
-      // marked Pro. `owner` (the GitHub login) travels in customData, set when the
-      // checkout was opened in /subscribe; fall back to the stored customer->owner
-      // mapping for events that don't carry customData (e.g. some renewal events).
-      if (eventData.eventType.startsWith("subscription.")) {
-        const sub = eventData.data as {
-          id: string;
-          status: string;
-          customerId: string;
-          customData?: { githubOwner?: string; plan?: string } | null;
-        };
+    const fields = typeof req.body?.custom_fields === "string" ? JSON.parse(req.body.custom_fields) : req.body?.custom_fields || {};
+    const owner = String(fields.githubOwner || req.body?.github_owner || "").trim().toLowerCase();
+    const existingOwner = await getOwnerForSale(saleId);
+    const resolvedOwner = owner || existingOwner;
+    if (!resolvedOwner) return res.status(200).send("Ignored: owner unavailable");
 
-        let owner = sub.customData?.githubOwner;
-        if (!owner) {
-          owner = (await getOwnerForCustomer(sub.customerId)) || undefined;
-        }
-
-        if (owner) {
-          await setProStatus({
-            owner,
-            plan: sub.customData?.plan || "pro",
-            paddleCustomerId: sub.customerId,
-            paddleSubscriptionId: sub.id,
-            status: sub.status,
-            updatedAt: new Date().toISOString(),
-          });
-        } else {
-          // Not fatal to the webhook (still 200, so Paddle doesn't retry forever) —
-          // but this customer's Pro status silently won't update until they check out
-          // again with customData intact. Loud in the logs on purpose.
-          console.error(
-            `${eventData.eventType}: could not resolve a GitHub owner for customer ${sub.customerId} — Pro status NOT updated. ` +
-              `customData was ${sub.customData ? JSON.stringify(sub.customData) : "missing"}.`
-          );
-        }
-      }
-
-      return res.status(200).send("OK");
-    } catch (err) {
-      console.error("Webhook error:", err);
-      return res.status(400).send("Invalid Signature");
-    }
+    const refunded = String(req.body?.refunded || "false") === "true";
+    const canceled = String(req.body?.subscription_cancelled_at || "").trim().length > 0;
+    await setProStatus({
+      owner: resolvedOwner,
+      plan,
+      gumroadProductId: productId,
+      gumroadSaleId: saleId,
+      gumroadSubscriptionId: String(req.body?.subscription_id || "") || undefined,
+      status: refunded ? "refunded" : canceled ? "canceled" : "active",
+      refundedAt: refunded ? new Date().toISOString() : undefined,
+      canceledAt: canceled ? new Date().toISOString() : undefined,
+      updatedAt: new Date().toISOString(),
+    });
+    return res.status(200).send("OK");
   },
 );
 
 // GitHub webhook MUST receive the raw request body for HMAC signature verification —
-// same reasoning as the Paddle webhook above, registered before express.json() for
+// same reasoning as the Gumroad webhook above, registered before express.json() for
 // the same reason: JSON.stringify(JSON.parse(body)) is not guaranteed to byte-match
 // what GitHub actually signed.
 app.post(
@@ -192,10 +160,10 @@ app.get("/site.webmanifest", (_req: Request, res: Response) => {
   res.type("application/manifest+json").sendFile(path.join(__dirname, "..", "site.webmanifest"));
 });
 
-// Serve the landing page at the domain root. Paddle's domain-approval review checks
+// Serve the landing page at the domain root. Gumroad's domain-approval review checks
 // the root URL you submit (e.g. https://warden-ci-dvk5.onrender.com/) for links to
 // terms/privacy/refund policy — without this route, that URL 404'd with "Cannot GET /"
-// and Paddle's reviewer would have no way to find those links at all.
+// and Gumroad's reviewer would have no way to find those links at all.
 app.get("/", (_req: Request, res: Response) => {
   res.sendFile(path.join(__dirname, "..", "index.html"));
 });
@@ -206,7 +174,7 @@ app.get("/details", (_req: Request, res: Response) => {
 
 /**
  * Renders TERMS.md / PRIVACY.md as a plain readable page. These MUST be reachable —
- * Paddle's domain-approval process requires your site to link through to (or contain)
+ * Gumroad's domain-approval process requires your site to link through to (or contain)
  * terms of service, a privacy notice, and a refund policy. Without these routes, the
  * footer links on the landing page 404, which is a likely cause of approval rejection.
  */
@@ -255,22 +223,17 @@ app.get("/subscribe", (req: Request, res: Response) => {
   const owner = String(req.query.owner || "user");
   const requestedPlan = String(req.query.plan || "pro").toLowerCase() as PlanKey;
   const selectedPlan: PlanKey = requestedPlan in plans ? requestedPlan : "pro";
-  const clientToken = process.env.PADDLE_CLIENT_TOKEN || "";
-  const environment = process.env.PADDLE_ENVIRONMENT === "production" ? "production" : "sandbox";
-  // Flip this env var to "true" the moment Paddle approves the domain — no redeploy
-  // of any other logic needed, checkout switches back on immediately. Until then,
-  // /subscribe collects emails instead of showing buttons that would fail at Paddle.
-  const checkoutEnabled = process.env.PADDLE_CHECKOUT_ENABLED === "true";
+  const checkoutEnabled = process.env.GUMROAD_CHECKOUT_ENABLED !== "false";
 
   const planCards = (Object.keys(plans) as PlanKey[])
     .map((key) => {
       const plan = plans[key];
       const selected = key === selectedPlan;
-      const priceIdConfigured = Boolean(plan.priceId());
+      const checkoutConfigured = Boolean(plan.checkoutUrl());
       const features = plan.features
         .map((feature) => `<li>✓ ${escapeHtml(feature)}</li>`)
         .join("");
-      const canCheckout = checkoutEnabled && priceIdConfigured && clientToken;
+      const canCheckout = checkoutEnabled && checkoutConfigured;
 
       return `
         <article class="plan ${selected ? "selected" : ""}" ${checkoutEnabled ? "" : `data-plan-card="${key}"`}>
@@ -299,8 +262,8 @@ app.get("/subscribe", (req: Request, res: Response) => {
     .join("\n");
 
   const configurationWarning =
-    checkoutEnabled && !clientToken
-      ? `<div class="warning">Paddle checkout is not configured: <code>PADDLE_CLIENT_TOKEN</code> is missing on the server.</div>`
+    checkoutEnabled && !(Object.keys(plans) as PlanKey[]).every((key) => plans[key].checkoutUrl())
+      ? `<div class="warning">Gumroad checkout is not fully configured: add the product checkout URLs to the server environment.</div>`
       : "";
 
   const waitlistSection = !checkoutEnabled
@@ -330,7 +293,6 @@ app.get("/subscribe", (req: Request, res: Response) => {
     gtag('config', 'G-XBE18HJZ5V');
   </script>
 
-  <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
   <style>
     *{box-sizing:border-box}body{margin:0;background:#020617;color:#f8fafc;font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif}.wrap{max-width:1120px;margin:0 auto;padding:56px 20px 72px}.eyebrow{color:#818cf8;font-weight:700;text-transform:uppercase;letter-spacing:.12em;font-size:12px;text-align:center}.title{text-align:center;font-size:42px;line-height:1.1;margin:10px 0}.subtitle{text-align:center;color:#94a3b8;max-width:680px;margin:0 auto 34px}.plans{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}.plan{background:#0f172a;border:1px solid #1e293b;border-radius:20px;padding:26px;min-height:460px;display:flex;flex-direction:column;justify-content:space-between}.plan[data-plan-card]{cursor:pointer;transition:border-color .15s,box-shadow .15s}.plan[data-plan-card]:hover{border-color:#4338ca}.plan.selected{border-color:#6366f1;box-shadow:0 0 0 1px #6366f1}.plan-title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.plan h2{font-size:24px;margin:0}.badge{display:none;font-size:11px;padding:5px 8px;border-radius:999px;background:#312e81;color:#c7d2fe;white-space:nowrap}.plan.selected .badge{display:inline-block}.description{color:#94a3b8;min-height:48px;line-height:1.5}.price{font-size:36px;font-weight:800;margin:22px 0}.price span{font-size:13px;font-weight:400;color:#64748b}.plan ul{list-style:none;padding:0;margin:0}.plan li{color:#cbd5e1;margin:12px 0;font-size:14px}.pick-hint{margin-top:20px;text-align:center;font-size:13px;font-weight:600;color:#64748b}.plan.selected .pick-hint{color:#818cf8}.checkout{width:100%;border:0;border-radius:12px;padding:13px 16px;font-weight:700;cursor:pointer;font-size:15px}.checkout.primary{background:#4f46e5;color:white}.checkout.primary:hover{background:#6366f1}.checkout.secondary{background:#1e293b;color:white}.checkout.secondary:hover{background:#334155}.checkout:disabled{opacity:.5;cursor:not-allowed}.warning{background:#451a03;border:1px solid #92400e;color:#fed7aa;padding:14px 16px;border-radius:12px;margin:0 auto 22px;max-width:800px}.status{text-align:center;min-height:24px;color:#94a3b8;margin-top:22px}.back{text-align:center;margin-top:26px}.back a{color:#818cf8;text-decoration:none}.waitlist-section{margin-top:48px;padding-top:40px;border-top:1px solid #1e293b}.waitlist-form{display:flex;gap:10px;justify-content:center;max-width:460px;margin:0 auto;flex-wrap:wrap}.waitlist-input{flex:1;min-width:220px;padding:12px 14px;border-radius:10px;border:1px solid #1e293b;background:#0f172a;color:#f8fafc;font-size:14px}@media(max-width:800px){.plans{grid-template-columns:1fr}.title{font-size:34px}}
   </style>
@@ -339,7 +301,7 @@ app.get("/subscribe", (req: Request, res: Response) => {
   <main class="wrap">
     <div class="eyebrow">Warden CI</div>
     <h1 class="title">Protect your codebase</h1>
-    <p class="subtitle">Choose the plan that fits your repository or engineering team. Checkout is powered securely by Paddle.</p>
+    <p class="subtitle">Choose the plan that fits your repository or engineering team. Checkout is powered securely by Gumroad.</p>
     ${configurationWarning}
     <section class="plans">${planCards}</section>
     ${waitlistSection}
@@ -348,57 +310,27 @@ app.get("/subscribe", (req: Request, res: Response) => {
   </main>
 
   <script>
-    const clientToken = ${jsString(clientToken)};
-    const environment = ${jsString(environment)};
     const owner = ${jsString(owner)};
     const checkoutEnabled = ${checkoutEnabled ? "true" : "false"};
-    const priceIds = ${JSON.stringify(Object.fromEntries((Object.keys(plans) as PlanKey[]).map((key) => [key, plans[key].priceId()]))) };
+    const checkoutUrls = ${JSON.stringify(Object.fromEntries((Object.keys(plans) as PlanKey[]).map((key) => [key, plans[key].checkoutUrl()]))) };
     const planNames = ${JSON.stringify(Object.fromEntries((Object.keys(plans) as PlanKey[]).map((key) => [key, plans[key].name])))};
     let selectedPlan = ${jsString(selectedPlan)};
     const statusEl = document.getElementById('status');
-
-    if (checkoutEnabled && clientToken) {
-      try {
-        // MUST run before Initialize(). If this call is skipped, Paddle.js silently
-        // defaults to "production" — so a sandbox client token + sandbox price IDs end
-        // up hitting Paddle's live API, which is what produces the generic "Something
-        // went wrong" overlay error with no useful message.
-        Paddle.Environment.set(environment);
-        Paddle.Initialize({ token: clientToken });
-      } catch (error) {
-        console.error('Paddle initialization failed:', error);
-        statusEl.textContent = 'Paddle could not be initialized. Check the client token and environment.';
-      }
-    }
 
     if (checkoutEnabled) {
       document.querySelectorAll('.checkout[data-plan]').forEach((button) => {
         button.addEventListener('click', () => {
           const plan = button.dataset.plan;
-          const priceId = priceIds[plan];
-          if (!priceId) {
+          const checkoutUrl = checkoutUrls[plan];
+          if (!checkoutUrl) {
             statusEl.textContent = 'This plan is not configured yet. Please contact the Warden CI administrator.';
             return;
           }
-          if (!clientToken) {
-            statusEl.textContent = 'Paddle is not configured on this deployment.';
-            return;
-          }
-
-          statusEl.textContent = 'Opening secure checkout…';
-          if (typeof gtag === 'function') {
-            gtag('event', 'begin_checkout', { plan: plan });
-          }
-          try {
-            Paddle.Checkout.open({
-              items: [{ priceId, quantity: 1 }],
-              customData: { githubOwner: owner, plan },
-              settings: { displayMode: 'overlay', theme: 'dark' },
-            });
-          } catch (error) {
-            console.error('Paddle checkout failed:', error);
-            statusEl.textContent = 'Paddle checkout could not be opened. Verify that the client token and selected price belong to the same Paddle environment.';
-          }
+          if (typeof gtag === 'function') gtag('event', 'begin_checkout', { plan });
+          const url = new URL(checkoutUrl);
+          url.searchParams.set('github_owner', owner);
+          url.searchParams.set('plan', plan);
+          window.location.assign(url.toString());
         });
       });
     } else {
@@ -494,23 +426,21 @@ app.get("/admin/waitlist", async (req: Request, res: Response) => {
 });
 
 // Debug fields (rawCheckoutEnabledValue / rawCheckoutEnabledLength) show exactly what
-// the server sees for PADDLE_CHECKOUT_ENABLED — no guessing whether a typo, stray
+// the server sees for GUMROAD_CHECKOUT_ENABLED — no guessing whether a typo, stray
 // whitespace, or wrong casing is why /subscribe is still showing the waitlist view.
 // A value like "true " (trailing space) looks identical to "true" in most UI text
 // boxes but has length 5, not 4, and fails the strict === "true" check silently.
 app.get("/health", (_req: Request, res: Response) => {
-  const rawFlag = process.env.PADDLE_CHECKOUT_ENABLED;
+  const rawFlag = process.env.GUMROAD_CHECKOUT_ENABLED;
   res.json({
     ok: true,
-    paddleEnvironment: process.env.PADDLE_ENVIRONMENT === "production" ? "production" : "sandbox",
-    paddleClientTokenConfigured: Boolean(process.env.PADDLE_CLIENT_TOKEN),
-    checkoutEnabled: rawFlag === "true",
+    gumroadWebhookConfigured: Boolean(process.env.GUMROAD_WEBHOOK_SECRET),
+    checkoutEnabled: rawFlag !== "false",
     rawCheckoutEnabledValue: rawFlag ?? null,
-    rawCheckoutEnabledLength: rawFlag ? rawFlag.length : 0,
     plans: {
-      pro: Boolean(process.env.PADDLE_PRICE_PRO),
-      team: Boolean(process.env.PADDLE_PRICE_TEAM),
-      enterprise: Boolean(process.env.PADDLE_PRICE_ENTERPRISE),
+      pro: Boolean(process.env.GUMROAD_CHECKOUT_PRO && process.env.GUMROAD_PRODUCT_PRO),
+      team: Boolean(process.env.GUMROAD_CHECKOUT_TEAM && process.env.GUMROAD_PRODUCT_TEAM),
+      enterprise: Boolean(process.env.GUMROAD_CHECKOUT_ENTERPRISE && process.env.GUMROAD_PRODUCT_ENTERPRISE),
     },
   });
 });

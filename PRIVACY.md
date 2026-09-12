@@ -22,10 +22,10 @@ Warden CI is installed as a GitHub App with the following permissions:
   existence when a new `import`/`require` is added, to catch hallucinated or
   typosquatted package names. Only the package name is sent — no file content.
 - **PyPI public registry**: same as above, for Python `import` statements.
-- **Paddle**: if you subscribe to the Pro plan, Paddle acts as Merchant of
+- **Gumroad**: if you subscribe to the Pro plan, Gumroad acts as Merchant of
   Record for your payment — we never see or store your card details, and
-  Paddle (not us) handles applicable sales tax/VAT on your purchase. We store
-  your Paddle customer ID and subscription status to know whether to unlock
+  Gumroad (not us) handles applicable sales tax/VAT on your purchase. We store
+  your Gumroad customer ID and subscription status to know whether to unlock
   private-repo scanning.
 
 ## Detection corpus (only if telemetry is enabled — see below)
