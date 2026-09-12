@@ -20,6 +20,10 @@ export interface ScanAnnotation {
   message: string;
   title: string;
   severity: Severity;
+  category: "secret" | "execution" | "dependency";
+  confidence: "high" | "medium";
+  remediation: string;
+  fingerprint: string;
 }
 
 /** One row per distinct flagged package, for telemetry — independent of how many lines/files referenced it. */
@@ -32,6 +36,8 @@ export interface PackageFlag {
 
 export interface ScanResult {
   annotations: ScanAnnotation[];
+  verdict: "pass" | "fail" | "incomplete";
+  durationMs: number;
   packageFlags: PackageFlag[];
   filesScanned: number;
   filesSkipped: number;
@@ -72,6 +78,10 @@ async function checkPackageRisk(
             title: "Unverified package",
             severity: "warning",
             message: `Package "${pkg}" was not found on the ${ecosystem.label} registry. If this was suggested by an AI tool, it may be a hallucinated package name — verify before merging, since attackers register exactly these invented names to distribute malware.`,
+            category: "dependency",
+            confidence: "high",
+            remediation: `Confirm the package name on the ${ecosystem.label} registry and pin a trusted version before merging.`,
+            fingerprint: `dependency:${ecosystem.id}:${pkg}:hallucinated`,
           });
         } else {
           annotations.push({
@@ -79,6 +89,10 @@ async function checkPackageRisk(
             title: "Possible typosquat package",
             severity: "failure",
             message: `Package "${pkg}" exists but was only published ${verdict.publishedDaysAgo} day(s) ago and is a near-exact match for the popular package "${verdict.impersonating}". This is a common pattern for typosquat/slopsquat attacks — confirm this is the package you meant before merging.`,
+            category: "dependency",
+            confidence: "high",
+            remediation: `Compare the package owner, repository, release history, and lockfile before approving this dependency.`,
+            fingerprint: `dependency:${ecosystem.id}:${pkg}:typosquat:${verdict.impersonating}`,
           });
         }
       }
@@ -89,6 +103,7 @@ async function checkPackageRisk(
 }
 
 export async function scanFiles(files: ScannedFile[]): Promise<ScanResult> {
+  const startedAt = Date.now();
   const annotations: ScanAnnotation[] = [];
   const packageFlags: PackageFlag[] = [];
   let filesScanned = 0;
@@ -104,12 +119,12 @@ export async function scanFiles(files: ScannedFile[]): Promise<ScanResult> {
 
     const secrets = checkSecrets(addedLines);
     for (const f of secrets) {
-      annotations.push({ path: file.filename, line: f.line, message: f.message, title: "Possible hardcoded secret", severity: "failure" });
+      annotations.push({ path: file.filename, line: f.line, message: f.message, title: "Possible hardcoded secret", severity: "failure", category: "secret", confidence: "high", remediation: "Remove the credential, rotate it with the provider, and load it from a secret manager.", fingerprint: `secret:${file.filename}:${f.line}:${f.message}` });
     }
 
     const dangerousExec = checkDangerousExec(addedLines);
     for (const f of dangerousExec) {
-      annotations.push({ path: file.filename, line: f.line, message: f.message, title: "Dangerous dynamic execution", severity: "warning" });
+      annotations.push({ path: file.filename, line: f.line, message: f.message, title: "Dangerous dynamic execution", severity: "warning", category: "execution", confidence: "medium", remediation: "Replace dynamic execution with an allowlisted API and validate all untrusted input at the boundary.", fingerprint: `execution:${file.filename}:${f.line}:${f.message}` });
     }
 
     const ecosystem = ecosystemForFile(file.filename);
@@ -129,5 +144,6 @@ export async function scanFiles(files: ScannedFile[]): Promise<ScanResult> {
     annotations.length = MAX_ANNOTATIONS;
   }
 
-  return { annotations, packageFlags, filesScanned, filesSkipped };
+  const hasBlockingFinding = annotations.some((annotation) => annotation.severity === "failure");
+  return { annotations, packageFlags, filesScanned, filesSkipped, verdict: hasBlockingFinding ? "fail" : "pass", durationMs: Date.now() - startedAt };
 }

@@ -25,6 +25,9 @@ const PATTERNS: ExecPattern[] = [
   { name: "new Function()", regex: /\bnew\s+Function\s*\(/ },
   { name: "child_process.exec()", regex: /\b(child_process\.)?\bexec(Sync)?\s*\(/ },
   { name: "shell:true in spawn/exec", regex: /\bshell\s*:\s*true\b/ },
+  { name: "child_process.execFile() with shell", regex: /\bexecFile(?:Sync)?\s*\([^\n]*\bshell\s*:\s*true\b/ },
+  { name: "Python subprocess shell", regex: /\bsubprocess\.(?:run|Popen|call|check_output)\s*\([^\n]*shell\s*=\s*True\b/ },
+  { name: "Python eval/exec", regex: /\b(?:eval|exec)\s*\(/ },
 ];
 
 const SKIP_IF_CONTAINS = ["// eslint-disable", "test", "spec.ts", "spec.js"];

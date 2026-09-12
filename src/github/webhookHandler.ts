@@ -181,11 +181,12 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
     if (db && scanRun) {
       await db.insert(findings).values(annotations.map((annotation, index) => ({
         scanRunId: scanRun.id,
-        fingerprint: `${annotation.path}:${annotation.line}:${annotation.title}:${index}`,
+        fingerprint: annotation.fingerprint || `${annotation.path}:${annotation.line}:${annotation.title}:${index}`,
         severity: annotation.severity,
-        category: annotation.title,
+        category: annotation.category,
         title: annotation.title,
         message: annotation.message,
+        remediation: annotation.remediation,
         filePath: annotation.path,
         lineNumber: annotation.line,
       })));
@@ -212,7 +213,7 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
           end_line: a.line,
           annotation_level: a.severity === "failure" ? "failure" : "warning",
           title: a.title,
-          message: a.message,
+          message: `${a.message} Remediation: ${a.remediation}`,
         })),
       },
     });

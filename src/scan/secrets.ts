@@ -27,6 +27,10 @@ const PATTERNS: SecretPattern[] = [
   { name: "Slack token", regex: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
   { name: "Stripe secret key", regex: /\bsk_(live|test)_[A-Za-z0-9]{16,}\b/ },
   { name: "Google API key", regex: /\bAIza[0-9A-Za-z_-]{35}\b/ },
+  { name: "OpenAI API key", regex: /\bsk-(?:proj|admin|live)-[A-Za-z0-9_-]{20,}\b/ },
+  { name: "Anthropic API key", regex: /\bsk-ant-[A-Za-z0-9_-]{20,}\b/ },
+  { name: "npm access token", regex: /\bnpm_[A-Za-z0-9]{30,}\b/ },
+  { name: "SendGrid API key", regex: /\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b/ },
   { name: "Private key block", regex: /-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/ },
   {
     name: "Hardcoded credential assignment",
