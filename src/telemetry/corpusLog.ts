@@ -65,15 +65,28 @@ export async function setPrivateCorpusOptIn(installationId: number, enabled: boo
   else await redis.del(`${OPT_OUT_PREFIX}private:${installationId}`);
 }
 
+const SAFE_PACKAGE_NAME = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+$/i;
+const ALLOWED_ECOSYSTEMS = new Set(["npm", "pypi", "rust", "ruby"]);
+const ALLOWED_VERDICTS = new Set<Verdict>(["hallucinated", "typosquat-suspect", "dependency-confusion-suspect", "maintainer-takeover-suspect"]);
+
 export function sanitizeCorpusInput(input: CorpusTelemetryInput): CorpusEvent {
+  if (!ALLOWED_ECOSYSTEMS.has(input.ecosystem) || !SAFE_PACKAGE_NAME.test(input.packageName) || input.packageName.length > 214 || !ALLOWED_VERDICTS.has(input.verdict)) {
+    throw new Error("Invalid corpus telemetry package event");
+  }
+  if (input.impersonating !== undefined && (!SAFE_PACKAGE_NAME.test(input.impersonating) || input.impersonating.length > 214)) {
+    throw new Error("Invalid corpus telemetry impersonating package");
+  }
+  const timestamp = new Date(input.timestamp);
+  if (!Number.isFinite(timestamp.getTime())) throw new Error("Invalid corpus telemetry timestamp");
   return {
     ecosystem: input.ecosystem,
     packageName: input.packageName,
     verdict: input.verdict,
     ...(input.impersonating ? { impersonating: input.impersonating } : {}),
-    timestamp: input.timestamp,
+    timestamp: timestamp.toISOString(),
   };
 }
+
 
 export async function logCorpusEvent(input: CorpusTelemetryInput): Promise<void> {
   if (!telemetryEnabled()) return;

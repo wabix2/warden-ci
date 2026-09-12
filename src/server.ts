@@ -33,13 +33,22 @@ async function githubJson<T>(url: string, token: string): Promise<T> {
   return await response.json() as T;
 }
 
-async function dashboardInstallation(req: Request): Promise<Set<number> | null> {
+async function dashboardInstallation(req: Request, installationId: number): Promise<boolean | null> {
   const sessionId = cookieValue(req, SESSION_COOKIE);
   if (!sessionId) return null;
   const token = await getRedisClient().get<string>(`warden:oauth:session:${sessionId}`);
   if (!token) return null;
-  const data = await githubJson<{ installations: Array<{ id: number }> }>("https://api.github.com/user/installations", token);
-  return new Set(data.installations.map((installation) => installation.id));
+
+  // Use GitHub's installation-specific user endpoint rather than trusting the
+  // broad /user/installations listing. GitHub must explicitly authorize this
+  // OAuth principal for the requested installation before settings are changed.
+  const response = await fetch(`https://api.github.com/user/installations/${installationId}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+  });
+  if (response.status === 401) return null;
+  if (response.status === 403 || response.status === 404) return false;
+  if (!response.ok) throw new Error(`GitHub installation authorization failed (${response.status})`);
+  return true;
 }
 
 // Fail loud at boot, not silently on the first user's request — if this prints on
@@ -225,7 +234,15 @@ app.get("/auth/github", (_req: Request, res: Response) => {
 app.get("/auth/github/callback", async (req: Request, res: Response) => {
   const state = String(req.query.state || "");
   const expected = cookieValue(req, OAUTH_STATE_COOKIE);
-  if (!state || !expected || state !== expected || await getRedisClient().get(`warden:oauth:state:${state}`) !== "1") return res.status(403).send("Invalid OAuth state");
+  if (!state || !expected || state !== expected) return res.status(403).send("Invalid OAuth state");
+  const stateKey = `warden:oauth:state:${state}`;
+  const redis = getRedisClient();
+  const stateValue = await redis.get<string>(stateKey);
+  if (stateValue !== "1") return res.status(403).send("Invalid OAuth state");
+  // Consume the state before exchanging the code. A callback replay must fail
+  // even if the first request has not finished creating its session yet.
+  await redis.del(stateKey);
+  if (!req.query.code) return res.status(400).send("Missing OAuth code");
   try {
     const response = await fetch("https://github.com/login/oauth/access_token", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify({ client_id: process.env.GITHUB_OAUTH_CLIENT_ID, client_secret: process.env.GITHUB_OAUTH_CLIENT_SECRET, code: String(req.query.code || "") }) });
     const data = await response.json() as { access_token?: string };
@@ -244,9 +261,9 @@ app.get("/api/telemetry/settings", async (req: Request, res: Response) => {
   const installationId = Number(req.query.installationId);
   if (!Number.isSafeInteger(installationId) || installationId <= 0) return res.status(400).json({ ok: false, error: "Invalid installation ID" });
   try {
-    const installations = await dashboardInstallation(req);
-    if (!installations) return res.status(401).json({ ok: false, error: "GitHub login required" });
-    if (!installations.has(installationId)) return res.status(403).json({ ok: false, error: "Installation is not authorized for this GitHub account" });
+    const authorized = await dashboardInstallation(req, installationId);
+    if (authorized === null) return res.status(401).json({ ok: false, error: "GitHub login required" });
+    if (!authorized) return res.status(403).json({ ok: false, error: "Installation is not authorized for this GitHub account" });
     const redis = getRedisClient();
     return res.json({ ok: true, publicOptedOut: (await redis.get(`warden:telemetry:optout:${installationId}`)) === "1", privateOptedIn: (await redis.get(`warden:telemetry:optout:private:${installationId}`)) === "enabled" });
   } catch (error) { console.error("Telemetry settings read failed:", error); return res.status(502).json({ ok: false, error: "Could not verify GitHub installation" }); }
@@ -256,9 +273,9 @@ app.put("/api/telemetry/settings", async (req: Request, res: Response) => {
   const installationId = Number(req.body?.installationId);
   if (!Number.isSafeInteger(installationId) || installationId <= 0) return res.status(400).json({ ok: false, error: "Invalid installation ID" });
   try {
-    const installations = await dashboardInstallation(req);
-    if (!installations) return res.status(401).json({ ok: false, error: "GitHub login required" });
-    if (!installations.has(installationId)) return res.status(403).json({ ok: false, error: "Installation is not authorized for this GitHub account" });
+    const authorized = await dashboardInstallation(req, installationId);
+    if (authorized === null) return res.status(401).json({ ok: false, error: "GitHub login required" });
+    if (!authorized) return res.status(403).json({ ok: false, error: "Installation is not authorized for this GitHub account" });
     if (typeof req.body.publicOptedOut === "boolean") await setInstallationCorpusOptOut(installationId, req.body.publicOptedOut);
     if (typeof req.body.privateOptedIn === "boolean") await setPrivateCorpusOptIn(installationId, req.body.privateOptedIn);
     return res.json({ ok: true });

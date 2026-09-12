@@ -38,6 +38,8 @@ async function getNpmMetadata(pkg: string): Promise<{ exists: boolean; published
     npmExistenceCache.set(pkg, result);
     return result;
   } catch {
+    // Network failures must not turn an unavailable registry into a false
+    // security finding. Surface the outage without storing document content.
     return { exists: true };
   }
 }
