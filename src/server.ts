@@ -2,15 +2,17 @@ import express, { Request, Response } from "express";
 import path from "path";
 import { readFileSync } from "fs";
 import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { setProStatus, getOwnerForSale, addToWaitlist, getWaitlist } from "./billing/store";
 import { scanFiles, ScannedFile } from "./scan";
 import { defaultScanPolicy, evaluatePolicy, toCycloneDx, toSarif, redact } from "./scan/enterprise";
 import { db } from "./db";
-import { scanRuns, findings, auditEvents } from "./db/schema";
+import { repositories, scanRuns, findings, auditEvents } from "./db/schema";
 import { handlePullRequestWebhook } from "./github/webhookHandler";
 import { getRedisClient } from "./lib/redis";
 import { schedulePopularPackageRefresh } from "./scan/popularPackageRefresh";
 import { setInstallationCorpusOptOut, setPrivateCorpusOptIn } from "./telemetry/corpusLog";
+import { authorizeRunAccess, isUuid } from "./auth/runAccess";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -213,8 +215,39 @@ app.get("/", (_req: Request, res: Response) => {
   res.sendFile(path.join(__dirname, "..", "index.html"));
 });
 
-app.get("/details", (_req: Request, res: Response) => {
-  res.sendFile(path.join(__dirname, "..", "index.html"));
+app.get("/api/runs/:runId", async (req: Request, res: Response) => {
+  const runId = String(req.params.runId || "");
+  if (!isUuid(runId)) return res.status(404).json({ ok: false, error: "Run not found" });
+  try {
+    const access = await authorizeRunAccess(req, runId);
+    if (access.kind === "unauthenticated") return res.status(401).json({ ok: false, error: "GitHub login required" });
+    if (access.kind === "not_found") return res.status(404).json({ ok: false, error: "Run not found" });
+    if (access.kind === "forbidden") return res.status(403).json({ ok: false, error: "Run access is not authorized" });
+    if (!db) return res.status(503).json({ ok: false, error: "Database unavailable" });
+    const repository = (await db.select({ fullName: repositories.fullName, defaultBranch: repositories.defaultBranch })
+      .from(repositories).innerJoin(scanRuns, eq(scanRuns.repositoryId, repositories.id)).where(eq(scanRuns.id, runId)).limit(1))[0];
+    const reportFindings = await db.select({
+      id: findings.id, severity: findings.severity, category: findings.category, title: findings.title,
+      message: findings.message, filePath: findings.filePath, lineNumber: findings.lineNumber,
+      remediation: findings.remediation, status: findings.status, createdAt: findings.createdAt,
+    }).from(findings).where(eq(findings.scanRunId, runId));
+    return res.json({ ok: true, run: {
+      id: access.run.id, scanTimestamp: access.run.completedAt || access.run.startedAt || access.run.createdAt,
+      createdAt: access.run.createdAt, pullRequestNumber: access.run.pullRequestNumber,
+      commitSha: access.run.commitSha, status: access.run.status, verdict: access.run.verdict,
+      findingsCount: access.run.findingsCount, repository: repository?.fullName || null,
+      defaultBranch: repository?.defaultBranch || null,
+      findings: reportFindings,
+    }});
+  } catch (error) {
+    console.error("Run report access failed:", error);
+    return res.status(502).json({ ok: false, error: "Could not load run report" });
+  }
+});
+
+app.get("/details", (req: Request, res: Response) => {
+  if (!req.query.runId) return res.sendFile(path.join(__dirname, "..", "index.html"));
+  res.sendFile(path.join(__dirname, "..", "report.html"));
 });
 
 app.get("/dashboard", (_req: Request, res: Response) => {

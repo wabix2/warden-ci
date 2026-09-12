@@ -85,9 +85,9 @@ the actual attempt at defensibility, in honest current state:
 
 ## Not yet built
 
-Beyond what's noted above: no `/fix` auto-remediation, no `issue_comment`
-handling, and no per-run detail page (`/details` is still a static page, not
-a rendered report of a specific scan). Private-repo scanning IS now gated on
+Beyond what's noted above: no `/fix` auto-remediation and no `issue_comment`
+handling. `/details?runId=...` is now an authenticated per-run security report;
+`/details` without a run ID remains the public landing page. Private-repo scanning IS now gated on
 Pro status (`isProActive` in `billing/store.ts`, checked in
 `webhookHandler.ts` before scanning private repos) — that used to be sold but
 unenforced; it's enforced now.

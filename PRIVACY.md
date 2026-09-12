@@ -53,11 +53,17 @@ disclosed package-event fields, making those exclusions structural rather than
 caller convention.
 
 
+## Authenticated security reports
+
+Per-run reports are available only through `/details?runId=...` after GitHub OAuth. Each run is owned through the server-side chain `scan run -> repository -> GitHub App installation`; the server then asks GitHub whether the signed-in OAuth account is authorized for that exact installation. Missing runs return 404, while authenticated users without installation authorization receive 403; no run ID or repository name is treated as authorization. This verifies installation-specific access using GitHub's API and is not a claim that the account is an organization owner. Report responses omit OAuth tokens, session IDs, app keys, telemetry corpus data, and unrelated installation records.
+
 ## What we store
 
 - Your GitHub account/organization login and billing status (free / trialing / active
   / canceled), stored in our billing database (Upstash Redis).
-- We do **not** persistently store your source code. Diffs are processed
+- Run metadata and findings needed for authorized security reports, including the
+  owning installation relationship, repository context, commit SHA, and finding
+  details. We do **not** persistently store your source code. Diffs are processed
   in-memory during a scan and are not retained afterward. 
 
 ## Data retention
