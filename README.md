@@ -40,8 +40,9 @@ package names).
     with correct new-file line numbers.
 - **`src/telemetry/corpusLog.ts`** — logs flagged-package events (package
   name, ecosystem, verdict — never code, file paths, or account identity) so
-  the product accumulates a detection history over time. **Disabled by
-  default** — see "Differentiation" below for why.
+  the product accumulates a detection history over time. **Enabled for public
+  repositories by default; private repositories require explicit opt-in** — see
+  `PRIVACY.md` for the exact fields, controls, and retention.
 - **`src/billing/store.ts`** — persistent Pro-status tracking via Upstash Redis,
   keyed by GitHub account/org login.
 - **`ide-extension/`** — a separate, minimal VS Code extension scaffold. See

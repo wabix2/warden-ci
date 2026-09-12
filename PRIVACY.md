@@ -5,7 +5,7 @@ before relying on it, especially if you'll have customers in the EU/UK (GDPR)
 or California (CCPA) — those have specific disclosure requirements this
 template does not fully cover.
 
-_Last updated: August 21, 2026  
+_Last updated: September 12, 2026_
 
 **Warden CI is a product of Focus Switch.**
 
@@ -40,9 +40,11 @@ retained for 365 days, after which Redis expires them.
 Private-repository scans are excluded by default. A customer may explicitly opt
 in a GitHub installation through the dashboard: click "Connect GitHub", authorize
 Warden, enter an installation ID visible in the GitHub App installation URL, and
-use the public/private controls. The API verifies that the authorized GitHub
-account administers that installation; public installations may opt out and
-private installations may opt in. Telemetry failures never fail or alter a scan.
+use the public/private controls. The API verifies that GitHub authorizes the signed-in account for that specific
+installation before changing settings; public installations may opt out and
+private installations may opt in. GitHub's OAuth API does not expose a universal
+installation-owner assertion to this app, so this is not represented as proof of
+organization ownership. Telemetry failures never fail or alter a scan.
 
 The corpus never stores source code, diff content, file paths, repository names,
 organization or user logins, GitHub installation IDs, billing identifiers, or
