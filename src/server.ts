@@ -12,7 +12,7 @@ import { handlePullRequestWebhook } from "./github/webhookHandler";
 import { getRedisClient } from "./lib/redis";
 import { schedulePopularPackageRefresh } from "./scan/popularPackageRefresh";
 import { setInstallationCorpusOptOut, setPrivateCorpusOptIn } from "./telemetry/corpusLog";
-import { authorizeRunAccess, isUuid } from "./auth/runAccess";
+import { authorizeInstallationAccess, authorizeRunAccess, isUuid } from "./auth/runAccess";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -40,17 +40,13 @@ async function dashboardInstallation(req: Request, installationId: number): Prom
   if (!sessionId) return null;
   const token = await getRedisClient().get<string>(`warden:oauth:session:${sessionId}`);
   if (!token) return null;
-
-  // Use GitHub's installation-specific user endpoint rather than trusting the
-  // broad /user/installations listing. GitHub must explicitly authorize this
-  // OAuth principal for the requested installation before settings are changed.
-  const response = await fetch(`https://api.github.com/user/installations/${installationId}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
-  });
-  if (response.status === 401) return null;
-  if (response.status === 403 || response.status === 404) return false;
-  if (!response.ok) throw new Error(`GitHub installation authorization failed (${response.status})`);
-  return true;
+  try {
+    return await authorizeInstallationAccess(token, installationId, fetch);
+  } catch (error) {
+    if ((error as { status?: number }).status === 401) return null;
+    if ((error as { status?: number }).status === 403 || (error as { status?: number }).status === 404) return false;
+    throw error;
+  }
 }
 
 // Fail loud at boot, not silently on the first user's request — if this prints on
@@ -261,7 +257,7 @@ app.get("/auth/github", (_req: Request, res: Response) => {
   const callback = `${process.env.PUBLIC_BASE_URL || `${_req.protocol}://${_req.get("host")}`}/auth/github/callback`;
   void getRedisClient().set(`warden:oauth:state:${state}`, "1", { ex: 600 });
   res.setHeader("Set-Cookie", `${OAUTH_STATE_COOKIE}=${state}; HttpOnly; SameSite=Lax; Path=/${secureCookie(_req)}`);
-  res.redirect(`https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(callback)}&scope=read:org`);
+  res.redirect(`https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(callback)}&scope=`);
 });
 
 app.get("/auth/github/callback", async (req: Request, res: Response) => {

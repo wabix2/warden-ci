@@ -86,7 +86,11 @@ the actual attempt at defensibility, in honest current state:
 ## Not yet built
 
 Beyond what's noted above: no `/fix` auto-remediation and no `issue_comment`
-handling. `/details?runId=...` is now an authenticated per-run security report;
+handling. `/details?runId=...` is now an authenticated per-run security report. The
+server uses GitHub's documented `GET /user/installations/{installation_id}/repositories`
+endpoint with the OAuth user's token and authorizes only when the exact repository
+stored on the run is returned with `permissions.pull: true`. Read access is the
+intentional minimum for viewing reports; organization ownership is not claimed.
 `/details` without a run ID remains the public landing page. Private-repo scanning IS now gated on
 Pro status (`isProActive` in `billing/store.ts`, checked in
 `webhookHandler.ts` before scanning private repos) — that used to be sold but
@@ -171,6 +175,8 @@ whether it's time to move to a paid instance.
 ## Enterprise outputs and policy
 
 The scan API supports `?format=sarif` for GitHub code-scanning-compatible results and `?format=cyclonedx` for dependency inventory exchange. Copy `warden-policy.example.json` to `warden-policy.json` and review it in code review; policy history and suppressions are persisted in Neon so exceptions are attributable and can expire.
+
+Telemetry settings use the same documented installation-repositories API and require at least one repository with read access in the requested installation. Run reports apply the stricter exact-repository check. The OAuth flow requests no broad organization scope; the GitHub App installation and repository permissions are the source of truth.
 
 The repository also includes `.github/workflows/warden-scan.yml` as a reference GitHub Action. It fails closed when the API reports blocking findings and requires `WARDEN_URL` plus `WARDEN_API_TOKEN` repository secrets.
 
