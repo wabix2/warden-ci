@@ -38,9 +38,11 @@ Raw event samples are retained for 90 days; aggregate package/verdict counts are
 retained for 365 days, after which Redis expires them.
 
 Private-repository scans are excluded by default. A customer may explicitly opt
-in a GitHub installation through the installation telemetry setting; public
-installations may opt out using the same setting. Telemetry failures never fail
-or alter a scan.
+in a GitHub installation through the dashboard: click "Connect GitHub", authorize
+Warden, enter an installation ID visible in the GitHub App installation URL, and
+use the public/private controls. The API verifies that the authorized GitHub
+account administers that installation; public installations may opt out and
+private installations may opt in. Telemetry failures never fail or alter a scan.
 
 The corpus never stores source code, diff content, file paths, repository names,
 organization or user logins, GitHub installation IDs, billing identifiers, or
