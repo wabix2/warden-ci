@@ -58,10 +58,12 @@ the actual attempt at defensibility, in honest current state:
 1. **Detection corpus (`telemetry/corpusLog.ts`)** — every flagged package,
    logged over time, across every install. This is the strongest one: it
    compounds with usage, so a competitor starting later has no way to
-   shortcut past your history. **Status: built, off by default.** Turning it
-   on for real customers requires `PRIVACY.md`'s telemetry section to
-   actually be true first (it's written, but flagged as a TODO pending
-   review) — this is a legal gate, not a technical one.
+   shortcut past your history. **Status: enabled for public-repository scans.**
+   Raw events expire after 90 days and aggregate counts after 365 days. Private
+   repositories are excluded by default, and each installation can opt out (or
+   explicitly opt in for private scans). The logger stores only ecosystem,
+   package name, verdict, optional impersonated package, and timestamp — never
+   code, paths, repository names, identity, or installation IDs.
 2. **Package-risk signals (`riskSignals.ts`)** — catches near-miss
    package names published recently, not just nonexistent ones. **Status:
    built and live**, using a daily background refresh from npm's official

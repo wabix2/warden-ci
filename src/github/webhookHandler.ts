@@ -22,7 +22,7 @@ import { eq } from "drizzle-orm";
 import { getInstallationClient } from "./appAuth";
 import { verifyGithubSignature } from "./verifySignature";
 import { scanFiles, ScanAnnotation } from "../scan";
-import { logCorpusEvent, telemetryEnabled } from "../telemetry/corpusLog";
+import { corpusLoggingAllowed, logCorpusEvent } from "../telemetry/corpusLog";
 import { isProActive } from "../billing/store";
 import { getRedisClient } from "../lib/redis";
 import { evaluateGate } from "../enforcement/policy";
@@ -225,7 +225,10 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
       },
     });
 
-    if (telemetryEnabled()) {
+    // Public repositories participate by default; private repositories require
+    // explicit per-installation opt-in. The logger accepts only sanitized package
+    // fields, so repository/account/code data cannot cross this boundary.
+    if (await corpusLoggingAllowed(Number(installationId), isPrivate)) {
       const timestamp = new Date().toISOString();
       await Promise.all(
         packageFlags.map((flag) =>
@@ -234,7 +237,6 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
             packageName: flag.packageName,
             verdict: flag.verdict,
             impersonating: flag.impersonating,
-            installationId,
             timestamp,
           })
         )

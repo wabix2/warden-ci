@@ -1,68 +1,106 @@
-/**
- * Warden CI — detection corpus logging.
- *
- * This is the actual point-1 asset: a running record of which package names
- * get flagged as hallucinated or typosquat-suspect, across every install,
- * over time. A competitor starting today has zero of this history; it's the
- * one thing here that gets harder to replicate the longer the product runs,
- * rather than easier.
- *
- * PRIVACY DESIGN — deliberate, not incidental:
- *  - We log the package name, ecosystem, verdict, and an installation ID.
- *  - We never log repo names, file paths, file contents, org/user logins, or
- *    anything else about the customer's code. The corpus is "which package
- *    names get flagged," not "who flagged them."
- *  - The installation ID is stored so we can dedupe repeated flags from the
- *    same installer without needing to know who they are — it's an opaque
- *    GitHub installation ID, not tied to a login in this table.
- *
- * DISABLED BY DEFAULT. Turning this on is a legal/product decision, not an
- * engineering one: PRIVACY.md must actually disclose this before it's
- * switched on for real customers (see the TODO left in PRIVACY.md). Flip
- * WARDEN_TELEMETRY_ENABLED=true only after that's done.
- */
-
 import { getRedisClient } from "../lib/redis";
 import { Verdict } from "../scan/riskSignals";
 
+/**
+ * Detection corpus events are deliberately a narrow, sanitized package signal.
+ * Repository, organization, installation and code data never enter this type.
+ * Raw events expire after 90 days; per-package aggregates expire after 365 days.
+ */
 export interface CorpusEvent {
   ecosystem: string;
   packageName: string;
   verdict: Verdict;
   impersonating?: string;
-  installationId: number;
   timestamp: string;
 }
 
-const MAX_EVENT_LOG = 5000; // bounds storage cost; counts below are the durable aggregate, this list is a recent-activity sample
+export interface CorpusTelemetryInput {
+  ecosystem: string;
+  packageName: string;
+  verdict: Verdict;
+  impersonating?: string;
+  timestamp: string;
+}
+
+const MAX_EVENT_LOG = 5000;
+const RAW_RETENTION_SECONDS = 90 * 24 * 60 * 60;
+const AGGREGATE_RETENTION_SECONDS = 365 * 24 * 60 * 60;
+const EVENTS_KEY = "warden:corpus:events";
+const OPT_OUT_PREFIX = "warden:telemetry:optout:";
 
 export function telemetryEnabled(): boolean {
-  return process.env.WARDEN_TELEMETRY_ENABLED === "true";
+  return process.env.WARDEN_TELEMETRY_ENABLED !== "false";
 }
 
 function countKey(ecosystem: string, verdict: Verdict, packageName: string): string {
   return `warden:corpus:count:${ecosystem}:${verdict}:${packageName}`;
 }
 
-export async function logCorpusEvent(event: CorpusEvent): Promise<void> {
-  if (!telemetryEnabled()) return;
+function optOutKey(installationId: number): string {
+  return `${OPT_OUT_PREFIX}${installationId}`;
+}
 
+export async function setInstallationCorpusOptOut(installationId: number, optedOut: boolean): Promise<void> {
+  const redis = getRedisClient();
+  if (optedOut) {
+    await redis.set(optOutKey(installationId), "1");
+  } else {
+    await redis.del(optOutKey(installationId));
+  }
+}
+
+/** Public-repository telemetry is on by default; private repositories require explicit opt-in. */
+export async function corpusLoggingAllowed(installationId: number, isPrivate: boolean): Promise<boolean> {
+  if (!telemetryEnabled()) return false;
+  const redis = getRedisClient();
+  if (isPrivate) {
+    return (await redis.get<string>(`${OPT_OUT_PREFIX}private:${installationId}`)) === "enabled";
+  }
+  return (await redis.get<string>(optOutKey(installationId))) !== "1";
+}
+
+export async function setPrivateCorpusOptIn(installationId: number, enabled: boolean): Promise<void> {
+  const redis = getRedisClient();
+  if (enabled) await redis.set(`${OPT_OUT_PREFIX}private:${installationId}`, "enabled");
+  else await redis.del(`${OPT_OUT_PREFIX}private:${installationId}`);
+}
+
+export function sanitizeCorpusInput(input: CorpusTelemetryInput): CorpusEvent {
+  return {
+    ecosystem: input.ecosystem,
+    packageName: input.packageName,
+    verdict: input.verdict,
+    ...(input.impersonating ? { impersonating: input.impersonating } : {}),
+    timestamp: input.timestamp,
+  };
+}
+
+export async function logCorpusEvent(input: CorpusTelemetryInput): Promise<void> {
+  if (!telemetryEnabled()) return;
+  const event = sanitizeCorpusInput(input);
   try {
     const redis = getRedisClient();
     await Promise.all([
       redis.incr(countKey(event.ecosystem, event.verdict, event.packageName)),
-      redis.lpush("warden:corpus:events", JSON.stringify(event)),
-      redis.ltrim("warden:corpus:events", 0, MAX_EVENT_LOG - 1),
+      redis.expire(countKey(event.ecosystem, event.verdict, event.packageName), AGGREGATE_RETENTION_SECONDS),
+      redis.lpush(EVENTS_KEY, JSON.stringify(event)),
+      redis.ltrim(EVENTS_KEY, 0, MAX_EVENT_LOG - 1),
+      redis.expire(EVENTS_KEY, RAW_RETENTION_SECONDS),
     ]);
   } catch (err) {
-    // Telemetry must never break scanning — log and move on.
     console.error("Corpus logging failed (non-fatal):", err);
   }
 }
 
-/** How many times a specific package has been flagged, across all installs, for a given verdict. Useful once you want to answer "is this a one-off or a pattern?" */
 export async function getPackageFlagCount(ecosystem: string, verdict: Verdict, packageName: string): Promise<number> {
   const redis = getRedisClient();
   const value = await redis.get<number>(countKey(ecosystem, verdict, packageName));
   return value ?? 0;
 }
+
+export const corpusRetention = {
+  rawEventDays: 90,
+  aggregateDays: 365,
+} as const;
+
+export const corpusOptOutKeyPrefix = OPT_OUT_PREFIX;
