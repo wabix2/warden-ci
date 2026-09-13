@@ -74,18 +74,23 @@ async function githubJson(url, token) {
         throw new Error(`GitHub OAuth request failed (${response.status})`);
     return await response.json();
 }
-async function dashboardInstallation(req, installationId) {
+async function getOAuthSession(req) {
     const sessionId = cookieValue(req, SESSION_COOKIE);
     if (!sessionId)
         return null;
-    const token = await (0, redis_1.getRedisClient)().get(`warden:oauth:session:${sessionId}`);
-    if (!token)
+    const session = await (0, redis_1.getRedisClient)().get(`warden:oauth:session:${sessionId}`);
+    if (!session || typeof session !== "object" || !session.accessToken || !session.login || session.expiresAt <= Date.now())
         return null;
-    // The settings mutate installation-wide telemetry behavior. GitHub's OAuth
-    // repository listing proves repository read access, not installation-wide
-    // administrative authority, so do not grant broader access on that basis.
-    // This remains fail-closed until a documented stronger proof is available.
-    return false;
+    return session;
+}
+async function dashboardInstallation(req, installationId) {
+    const session = await getOAuthSession(req);
+    if (!session)
+        return null;
+    if (!db_1.db)
+        return false;
+    const installation = (await db_1.db.select({ accountLogin: schema_1.installations.accountLogin }).from(schema_1.installations).where((0, drizzle_orm_1.eq)(schema_1.installations.githubInstallationId, installationId)).limit(1))[0];
+    return Boolean(installation && installation.accountLogin.toLowerCase() === session.login.toLowerCase());
 }
 // Fail loud at boot, not silently on the first user's request — if this prints on
 // deploy, the waitlist (and Pro-status checks) will fail until it's fixed.
@@ -379,8 +384,12 @@ app.get("/auth/github/callback", async (req, res) => {
         const data = await response.json();
         if (!data.access_token)
             return res.status(401).send("GitHub OAuth failed");
+        const identity = await githubJson("https://api.github.com/user", data.access_token);
+        if (!identity.login)
+            return res.status(401).send("GitHub identity unavailable");
         const sessionId = (0, node_crypto_1.randomBytes)(32).toString("hex");
-        await (0, redis_1.getRedisClient)().set(`warden:oauth:session:${sessionId}`, data.access_token, { ex: SESSION_TTL_SECONDS });
+        const session = { accessToken: data.access_token, login: identity.login, expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000 };
+        await (0, redis_1.getRedisClient)().set(`warden:oauth:session:${sessionId}`, session, { ex: SESSION_TTL_SECONDS });
         res.setHeader("Set-Cookie", `${SESSION_COOKIE}=${sessionId}; HttpOnly; SameSite=Lax; Path=/${secureCookie(req)}`);
         return res.redirect("/dashboard");
     }
@@ -452,17 +461,23 @@ app.put("/api/telemetry/settings", async (req, res) => {
     }
 });
 app.get("/api/dashboard/summary", async (req, res) => {
-    const sessionId = cookieValue(req, SESSION_COOKIE);
-    const sessionToken = sessionId ? await (0, redis_1.getRedisClient)().get(`warden:oauth:session:${sessionId}`) : null;
-    if (!sessionToken)
+    const session = await getOAuthSession(req);
+    if (!session)
         return res.status(401).json({ ok: false, error: "GitHub login required" });
     if (!db_1.db)
         return res.status(503).json({ ok: false, error: "Database unavailable" });
     const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 100);
     try {
-        const runs = await db_1.db.select().from(schema_1.scanRuns).limit(limit);
-        const recentFindings = await db_1.db.select().from(schema_1.findings).limit(limit);
-        const audit = await db_1.db.select().from(schema_1.auditEvents).limit(limit);
+        const ownedInstallations = await db_1.db.select({ id: schema_1.installations.id }).from(schema_1.installations).where((0, drizzle_orm_1.eq)(schema_1.installations.accountLogin, session.login));
+        const installationIds = ownedInstallations.map((item) => item.id);
+        if (installationIds.length === 0)
+            return res.json({ ok: true, generatedAt: new Date().toISOString(), summary: { scans: 0, blocked: 0, findings: 0 }, runs: [], findings: [], audit: [] });
+        const ownedRepositories = await db_1.db.select({ id: schema_1.repositories.id }).from(schema_1.repositories).where((0, drizzle_orm_1.inArray)(schema_1.repositories.installationId, installationIds));
+        const repositoryIds = ownedRepositories.map((item) => item.id);
+        const runs = repositoryIds.length ? await db_1.db.select().from(schema_1.scanRuns).where((0, drizzle_orm_1.inArray)(schema_1.scanRuns.repositoryId, repositoryIds)).limit(limit) : [];
+        const runIds = runs.map((run) => run.id);
+        const recentFindings = runIds.length ? await db_1.db.select().from(schema_1.findings).where((0, drizzle_orm_1.inArray)(schema_1.findings.scanRunId, runIds)).limit(limit) : [];
+        const audit = await db_1.db.select().from(schema_1.auditEvents).where((0, drizzle_orm_1.inArray)(schema_1.auditEvents.installationId, installationIds)).limit(limit);
         return res.json({ ok: true, generatedAt: new Date().toISOString(), summary: { scans: runs.length, blocked: runs.filter((run) => run.verdict === "failure").length, findings: recentFindings.length }, runs, findings: recentFindings, audit });
     }
     catch (error) {
