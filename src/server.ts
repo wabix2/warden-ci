@@ -19,6 +19,7 @@ import { getInstallationClient } from "./github/appAuth";
 import { applyDependencyRemediation, manifestDiffIsScoped } from "./remediation/engine";
 import { createRemediationPullRequest } from "./remediation/github";
 import { resolveOsvAdvisory } from "./remediation/osv";
+import { sendGmailMessage } from "./outreach/gmail";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -446,6 +447,22 @@ app.put("/api/telemetry/settings", async (req: Request, res: Response) => {
     if (typeof req.body.privateOptedIn === "boolean") await setPrivateCorpusOptIn(installationId, req.body.privateOptedIn);
     return res.json({ ok: true });
   } catch (error) { console.error("Telemetry settings write failed:", error); return res.status(502).json({ ok: false, error: "Could not update telemetry settings" }); }
+});
+
+app.post("/api/outreach/send", async (req: Request, res: Response) => {
+  const session = await getOAuthSession(req);
+  if (!session) return res.status(401).json({ ok: false, error: "GitHub login required" });
+  const body = req.body as { from?: string; to?: string; subject?: string; html?: string; consent?: boolean; approved?: boolean };
+  if (!body.approved || !body.consent) return res.status(409).json({ ok: false, error: "Human approval and recipient consent are required" });
+  if (!body.from || !body.to || !body.subject || !body.html) return res.status(400).json({ ok: false, error: "from, to, subject, and html are required" });
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.to) || body.to.length > 320) return res.status(400).json({ ok: false, error: "Invalid recipient" });
+  try {
+    await sendGmailMessage({ id: `github:${session.login}`, issuer: "github" }, { from: body.from, to: body.to, subject: body.subject, html: body.html });
+    return res.status(202).json({ ok: true, status: "accepted", recipient: body.to });
+  } catch (error) {
+    console.error(JSON.stringify({ event: "outreach_send_failed", requestId: res.locals.requestId, error: error instanceof Error ? error.message : "unknown" }));
+    return res.status(502).json({ ok: false, error: "Gmail authorization or delivery failed" });
+  }
 });
 
 app.get("/api/dashboard/summary", async (req: Request, res: Response) => {
