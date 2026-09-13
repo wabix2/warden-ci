@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -258,6 +291,40 @@ app.post("/api/automation/approvals/:approvalId/send", async (req, res) => {
     catch (error) {
         console.error("Approved email delivery failed:", error);
         return res.status(502).json({ ok: false, error: "Could not deliver approved email" });
+    }
+});
+const campaignEmailPattern = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
+app.post("/api/automation/campaigns/preview", (req, res) => {
+    if (!requireWardenToken(req, res))
+        return;
+    const raw = Array.isArray(req.body?.recipients) ? req.body.recipients : [];
+    const normalized = raw.map((value) => String(value).trim().toLowerCase()).filter((value) => Boolean(value));
+    const unique = [...new Set(normalized)];
+    const valid = unique.filter((email) => campaignEmailPattern.test(email)).slice(0, 500);
+    return res.json({ ok: true, valid, invalid: unique.filter((email) => !campaignEmailPattern.test(email)), duplicates: normalized.length - unique.length, capped: unique.length > 500 });
+});
+app.post("/api/automation/campaigns/:campaignId/send", async (req, res) => {
+    if (!requireWardenToken(req, res))
+        return;
+    const campaignId = String(req.params.campaignId || "").trim();
+    const recipients = Array.isArray(req.body?.recipients) ? [...new Set(req.body.recipients.map((value) => String(value).trim().toLowerCase()).filter((email) => campaignEmailPattern.test(email)))] : [];
+    const subject = String(req.body?.subject || "").trim();
+    const html = String(req.body?.html || "").trim();
+    const from = String(req.body?.from || process.env.WARDEN_SUPPORT_FROM || "").trim();
+    const authorized = req.body?.authorizationConfirmed === true;
+    if (!campaignId || !recipients.length || recipients.length > 500 || !subject || !html || !from || !authorized)
+        return res.status(400).json({ ok: false, error: "Campaign requires a verified audience, sender, content, and authorization confirmation" });
+    try {
+        const token = await (await Promise.resolve().then(() => __importStar(require("./automation/connect")))).getResendToken();
+        const response = await fetch("https://api.resend.com/broadcasts", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Idempotency-Key": `warden-campaign/${campaignId}` }, body: JSON.stringify({ from, subject, html, audience_id: process.env.RESEND_MARKETING_AUDIENCE_ID, to: recipients }) });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok)
+            return res.status(response.status >= 500 ? 502 : response.status).json({ ok: false, error: "Campaign provider rejected the send", details: body });
+        return res.status(202).json({ ok: true, status: "queued", campaignId, providerId: body.id || null });
+    }
+    catch (error) {
+        console.error("Campaign delivery failed:", error);
+        return res.status(502).json({ ok: false, error: "Could not queue campaign" });
     }
 });
 // Static assets referenced by index.html (logo, favicons, og:image) — the landing

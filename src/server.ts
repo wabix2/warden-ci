@@ -283,6 +283,37 @@ app.post("/api/automation/approvals/:approvalId/send", async (req: Request, res:
   }
 });
 
+const campaignEmailPattern = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
+app.post("/api/automation/campaigns/preview", (req: Request, res: Response) => {
+  if (!requireWardenToken(req, res)) return;
+  const raw = Array.isArray(req.body?.recipients) ? req.body.recipients : [];
+  const normalized: string[] = raw.map((value: unknown) => String(value).trim().toLowerCase()).filter((value: string): value is string => Boolean(value));
+  const unique: string[] = [...new Set(normalized)];
+  const valid = unique.filter((email) => campaignEmailPattern.test(email)).slice(0, 500);
+  return res.json({ ok: true, valid, invalid: unique.filter((email) => !campaignEmailPattern.test(email)), duplicates: normalized.length - unique.length, capped: unique.length > 500 });
+});
+
+app.post("/api/automation/campaigns/:campaignId/send", async (req: Request, res: Response) => {
+  if (!requireWardenToken(req, res)) return;
+  const campaignId = String(req.params.campaignId || "").trim();
+  const recipients = Array.isArray(req.body?.recipients) ? [...new Set((req.body.recipients as unknown[]).map((value) => String(value).trim().toLowerCase()).filter((email) => campaignEmailPattern.test(email)))] : [];
+  const subject = String(req.body?.subject || "").trim();
+  const html = String(req.body?.html || "").trim();
+  const from = String(req.body?.from || process.env.WARDEN_SUPPORT_FROM || "").trim();
+  const authorized = req.body?.authorizationConfirmed === true;
+  if (!campaignId || !recipients.length || recipients.length > 500 || !subject || !html || !from || !authorized) return res.status(400).json({ ok: false, error: "Campaign requires a verified audience, sender, content, and authorization confirmation" });
+  try {
+    const token = await (await import("./automation/connect")).getResendToken();
+    const response = await fetch("https://api.resend.com/broadcasts", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Idempotency-Key": `warden-campaign/${campaignId}` }, body: JSON.stringify({ from, subject, html, audience_id: process.env.RESEND_MARKETING_AUDIENCE_ID, to: recipients }) });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return res.status(response.status >= 500 ? 502 : response.status).json({ ok: false, error: "Campaign provider rejected the send", details: body });
+    return res.status(202).json({ ok: true, status: "queued", campaignId, providerId: body.id || null });
+  } catch (error) {
+    console.error("Campaign delivery failed:", error);
+    return res.status(502).json({ ok: false, error: "Could not queue campaign" });
+  }
+});
+
 // Static assets referenced by index.html (logo, favicons, og:image) — the landing
 // page's SEO meta tags point at /assets/*, so these must actually resolve.
 app.use("/assets", express.static(path.join(__dirname, "..", "assets")));
