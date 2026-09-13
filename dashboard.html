@@ -1,60 +1,20 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Warden CI — Security control room</title>
-  <style>
-    :root{color-scheme:dark;--bg:#071014;--surface:#0d1b20;--surface-2:#12262c;--line:#24434a;--text:#e8f2ef;--muted:#91aaa8;--accent:#55e6b2;--danger:#ff786d;--warn:#f2c66d}
-    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 Inter,system-ui,sans-serif}main{max-width:1180px;margin:auto;padding:32px 24px 64px}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;border-bottom:1px solid var(--line);padding-bottom:28px}.eyebrow{color:var(--accent);font:600 12px/1.2 ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase}.title{font-size:38px;line-height:1.05;margin:10px 0 8px;letter-spacing:-.04em}.subtitle{color:var(--muted);max-width:680px;margin:0}.badge{border:1px solid rgba(85,230,178,.45);color:var(--accent);border-radius:999px;padding:7px 11px;font:600 12px ui-monospace,monospace;white-space:nowrap}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:24px 0}.stat,.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px}.stat{padding:18px}.stat-label{color:var(--muted);font:12px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}.stat-value{font-size:30px;font-weight:700;margin-top:8px}.good{color:var(--accent)}.bad{color:var(--danger)}.warn{color:var(--warn)}.grid{display:grid;grid-template-columns:1.4fr .8fr;gap:16px}.panel{padding:20px}.panel h2{font-size:16px;margin:0 0 16px}.run{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0;border-top:1px solid var(--line)}.run:first-of-type{border-top:0}.run-name{font-weight:650}.run-meta{color:var(--muted);font-size:12px;margin-top:3px}.pill{border-radius:999px;padding:5px 9px;font:600 11px ui-monospace,monospace}.pill.fail{background:rgba(255,120,109,.12);color:var(--danger)}.pill.pass{background:rgba(85,230,178,.12);color:var(--accent)}.policy{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--line)}.policy:first-of-type{border-top:0}.switch{color:var(--accent);font:600 12px ui-monospace,monospace}.notice{margin-top:16px;background:rgba(242,198,109,.08);border:1px solid rgba(242,198,109,.35);color:var(--warn);border-radius:10px;padding:12px}.empty{color:var(--muted);padding:18px 0}@media(max-width:760px){main{padding:24px 16px}.top{display:block}.badge{display:inline-block;margin-top:20px}.stats{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.title{font-size:32px}}
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Warden CI — Automation control room</title>
+<style>
+:root{color-scheme:dark;--bg:#071014;--surface:#0d1b20;--surface2:#12262c;--line:#24434a;--text:#e8f2ef;--muted:#91aaa8;--accent:#55e6b2;--danger:#ff786d;--warn:#f2c66d;--blue:#82b8ff}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% -10%,#153036 0,transparent 38%),var(--bg);color:var(--text);font:14px/1.5 Inter,system-ui,sans-serif}main{max-width:1180px;margin:auto;padding:30px 24px 64px}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;border-bottom:1px solid var(--line);padding-bottom:25px}.eyebrow,.mono{font:600 11px ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase}.eyebrow{color:var(--accent)}h1{font-size:37px;line-height:1.05;letter-spacing:-.05em;margin:9px 0 8px}.subtitle{color:var(--muted);max-width:680px;margin:0}.badge{border:1px solid #3d806e;color:var(--accent);border-radius:999px;padding:7px 11px;white-space:nowrap}.tabs{display:flex;gap:6px;margin:21px 0 18px;border-bottom:1px solid var(--line);padding-bottom:10px}.tab{background:transparent;border:0;color:var(--muted);padding:8px 12px;border-radius:8px;cursor:pointer}.tab[aria-selected=true],.tab:hover{color:var(--text);background:var(--surface2)}.count{color:var(--accent);margin-left:4px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:0 0 18px}.stat,.panel{background:rgba(13,27,32,.9);border:1px solid var(--line);border-radius:14px}.stat{padding:16px}.stat-label{color:var(--muted);font-size:12px}.stat-value{font-size:29px;font-weight:750;margin-top:7px}.grid{display:grid;grid-template-columns:1.35fr .8fr;gap:16px}.panel{padding:19px}.panel h2{font-size:16px;margin:0 0 15px}.section-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.button{border:1px solid #3d806e;background:rgba(85,230,178,.1);color:var(--accent);border-radius:8px;padding:8px 12px;cursor:pointer;font-weight:650}.inbox-row{display:flex;align-items:center;gap:13px;padding:14px 0;border-top:1px solid var(--line)}.inbox-row:first-of-type{border-top:0}.avatar{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:#21464b;color:var(--accent);font-weight:700}.grow{flex:1;min-width:0}.subject{font-weight:700}.meta{color:var(--muted);font-size:12px;margin-top:2px}.tag{border-radius:999px;padding:4px 8px;font:600 10px ui-monospace,monospace}.urgent{color:var(--danger);background:rgba(255,120,109,.12)}.howto{color:var(--blue);background:rgba(130,184,255,.12)}.billing{color:var(--warn);background:rgba(242,198,109,.12)}.health{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-top:1px solid var(--line)}.health:first-of-type{border-top:0}.online{color:var(--accent);font:600 11px ui-monospace,monospace}.notice{margin-top:15px;padding:13px;border:1px solid #735d2e;background:rgba(242,198,109,.08);color:#dfd2aa;border-radius:10px;font-size:12px}.hidden{display:none}@media(max-width:760px){main{padding:22px 15px}.top{display:block}.badge{display:inline-block;margin-top:17px}.title,h1{font-size:31px}.stats{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.tabs{overflow:auto;white-space:nowrap}}
+</style>
 </head>
-<body>
-  <main>
-    <header class="top"><div><div class="eyebrow">Warden CI / control room</div><h1 class="title">Security gate health</h1><p class="subtitle">A decision surface for AI-generated code entering your repositories. Every verdict is backed by an explainable finding and an explicit policy.</p></div><div class="badge">BLOCK MODE ACTIVE</div></header>
-    <section class="stats" aria-label="Security summary"><div class="stat"><div class="stat-label">Scans this month</div><div class="stat-value">—</div></div><div class="stat"><div class="stat-label">Blocked merges</div><div class="stat-value bad">—</div></div><div class="stat"><div class="stat-label">Open findings</div><div class="stat-value warn">—</div></div><div class="stat"><div class="stat-label">Protected repos</div><div class="stat-value good">—</div></div></section>
-    <section class="grid"><article class="panel"><h2>Telemetry settings</h2><p class="run-meta">Sign in with GitHub to manage the Warden App installation you control.</p><div class="policy"><label for="installation-id">Installation ID</label><input id="installation-id" inputmode="numeric" placeholder="GitHub installation ID" style="background:var(--surface-2);border:1px solid var(--line);color:var(--text);padding:8px;border-radius:8px;width:180px" /></div><div class="policy"><span>Public scan corpus</span><button id="public-toggle" class="switch" type="button">Sign in first</button></div><div class="policy"><span>Private scan corpus</span><button id="private-toggle" class="switch" type="button">Sign in first</button></div><p id="telemetry-status" class="run-meta"></p><a class="switch" href="/auth/github">Connect GitHub</a></article><article class="panel"><h2>Recent gate decisions</h2><div class="notice">Live scan history appears here after the GitHub App is installed and the first protected pull request is evaluated. Warden does not display fabricated security metrics.</div></article><aside class="panel"><h2>Active policy</h2><div class="policy"><span>Mode</span><span class="switch">BLOCK</span></div><div class="policy"><span>Secrets</span><span class="switch">ON</span></div><div class="policy"><span>Malicious packages</span><span class="switch">ON</span></div><div class="policy"><span>Dangerous exec</span><span class="switch">ON</span></div><div class="policy"><span>Minimum severity</span><span class="switch">HIGH</span></div><div class="notice">Fail closed: if billing or policy storage is unavailable, private-repository scans do not silently become free.</div></aside></section>
-  </main>
-  <script>
-    const installationInput = document.getElementById('installation-id');
-    const publicToggle = document.getElementById('public-toggle');
-    const privateToggle = document.getElementById('private-toggle');
-    const telemetryStatus = document.getElementById('telemetry-status');
-    let telemetry = null;
-    async function loadTelemetry() {
-      const installationId = Number(installationInput.value);
-      if (!Number.isSafeInteger(installationId) || installationId <= 0) return;
-      const response = await fetch(`/api/telemetry/settings?installationId=${installationId}`);
-      if (!response.ok) { telemetryStatus.textContent = 'Connect GitHub or enter an installation you administer.'; return; }
-      telemetry = await response.json();
-      publicToggle.textContent = telemetry.publicOptedOut ? 'Opted out' : 'Enabled';
-      privateToggle.textContent = telemetry.privateOptedIn ? 'Enabled' : 'Opted out';
-      telemetryStatus.textContent = 'Settings loaded from the authenticated GitHub account.';
-    }
-    async function updateTelemetry(field, value) {
-      const installationId = Number(installationInput.value);
-      const response = await fetch('/api/telemetry/settings', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ installationId, [field]: value }) });
-      if (!response.ok) { telemetryStatus.textContent = 'Could not update settings.'; return; }
-      await loadTelemetry();
-    }
-    installationInput.addEventListener('change', loadTelemetry);
-    publicToggle.addEventListener('click', () => telemetry && updateTelemetry('publicOptedOut', !telemetry.publicOptedOut));
-    privateToggle.addEventListener('click', () => telemetry && updateTelemetry('privateOptedIn', !telemetry.privateOptedIn));
-    async function loadLiveData() {
-      const response = await fetch('/api/dashboard/summary?limit=25');
-      if (response.status === 401) {
-        document.querySelector('.notice').textContent = 'Connect GitHub to view live dashboard data.';
-        return;
-      }
-      if (!response.ok) return;
-      const data = await response.json();
-      const stats = document.querySelectorAll('.stat-value');
-      stats[0].textContent = String(data.summary.scans);
-      stats[1].textContent = String(data.summary.blocked);
-      stats[2].textContent = String(data.summary.findings);
-      document.querySelector('.notice').textContent = `Live data refreshed ${new Date(data.generatedAt).toLocaleString()}. ${data.runs.length} durable scan records loaded.`;
-    }
-    loadLiveData();
-  </script>
-</body>
-</html>
+<body><main>
+<header class="top"><div><div class="eyebrow">Warden CI / automation control room</div><h1>Support, without the busywork.</h1><p class="subtitle">AI triage for the Warden inbox, human-approved replies, and a complete audit trail for every customer-facing action.</p></div><div class="badge">APPROVAL GATE ON</div></header>
+<nav class="tabs" role="tablist" aria-label="Control room sections"><button class="tab" aria-selected="true" data-tab="inbox">Inbox</button><button class="tab" aria-selected="false" data-tab="approvals">Approvals <span class="count">3</span></button><button class="tab" aria-selected="false" data-tab="activity">Activity</button><button class="tab" aria-selected="false" data-tab="connections">Connections</button></nav>
+<section id="inbox-view"><section class="stats" aria-label="Support summary"><div class="stat"><div class="stat-label">Needs triage</div><div class="stat-value">3</div></div><div class="stat"><div class="stat-label">Awaiting approval</div><div class="stat-value warn">3</div></div><div class="stat"><div class="stat-label">Resolved this week</div><div class="stat-value good">18</div></div><div class="stat"><div class="stat-label">Median first reply</div><div class="stat-value">11m</div></div></section>
+<div class="grid"><article class="panel"><div class="section-head"><h2>Priority inbox</h2><button class="button" id="triage">Run triage</button></div><div class="inbox-row"><div class="avatar">MC</div><div class="grow"><div class="subject">Maya Chen</div><div>Private scan is blocking our release</div><div class="meta">12 min ago · Enterprise trial</div></div><span class="tag urgent">Urgent</span></div><div class="inbox-row"><div class="avatar">JB</div><div class="grow"><div class="subject">Jon Bell</div><div>How do I add Warden to a monorepo?</div><div class="meta">38 min ago · Setup</div></div><span class="tag howto">How-to</span></div><div class="inbox-row"><div class="avatar">PS</div><div class="grow"><div class="subject">Priya Shah</div><div>Question about the Pro plan</div><div class="meta">1 hr ago · Billing</div></div><span class="tag billing">Billing</span></div></article>
+<aside class="panel"><h2>Automation health</h2><div class="health"><span>Gmail inbox sync</span><span class="online">Connected</span></div><div class="health"><span>Reply drafting</span><span class="online">Ready</span></div><div class="health"><span>Approval gate</span><span class="online">Required</span></div><div class="health"><span>Resend delivery</span><span class="online">Connected</span></div><div class="notice">Warden never sends an AI-generated reply directly. Every outbound action is held until a team member approves it.</div></aside></div></section>
+<section id="secondary-view" class="panel hidden" aria-live="polite"><h2 id="secondary-title">Approvals</h2><p class="meta">Human review queue and immutable action history will appear here.</p></section>
+</main><script>
+const tabs=[...document.querySelectorAll('.tab')], inbox=document.getElementById('inbox-view'),secondary=document.getElementById('secondary-view'),title=document.getElementById('secondary-title');tabs.forEach(tab=>tab.addEventListener('click',()=>{tabs.forEach(t=>t.setAttribute('aria-selected',String(t===tab)));const name=tab.dataset.tab;if(name==='inbox'){inbox.classList.remove('hidden');secondary.classList.add('hidden')}else{inbox.classList.add('hidden');secondary.classList.remove('hidden');title.textContent=name[0].toUpperCase()+name.slice(1)}}));document.getElementById('triage').addEventListener('click',e=>{e.currentTarget.textContent='Triage queued';e.currentTarget.disabled=true});
+</script></body></html>
