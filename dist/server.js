@@ -23,6 +23,7 @@ const appAuth_1 = require("./github/appAuth");
 const engine_1 = require("./remediation/engine");
 const github_1 = require("./remediation/github");
 const osv_1 = require("./remediation/osv");
+const connect_1 = require("./automation/connect");
 const app = (0, express_1.default)();
 const PORT = Number(process.env.PORT || 3000);
 const OAUTH_STATE_COOKIE = "warden_oauth_state";
@@ -233,6 +234,32 @@ app.get("/ready", (_req, res) => {
     return res.status(ready ? 200 : 503).json({ ok: ready, status: ready ? "ready" : "degraded", dependencies: { redis: redisReady, github: githubReady } });
 });
 app.use(express_1.default.json({ limit: `${MAX_BODY_BYTES}b` }));
+function requireWardenToken(req, res) {
+    const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+    if (!process.env.WARDEN_API_TOKEN || token !== process.env.WARDEN_API_TOKEN) {
+        res.status(401).json({ ok: false, error: "Unauthorized" });
+        return false;
+    }
+    return true;
+}
+app.post("/api/automation/approvals/:approvalId/send", async (req, res) => {
+    if (!requireWardenToken(req, res))
+        return;
+    const approvalId = String(req.params.approvalId || "").trim();
+    const to = Array.isArray(req.body?.to) ? req.body.to.filter((value) => typeof value === "string" && value.includes("@")) : [];
+    const subject = String(req.body?.subject || "").trim();
+    const text = String(req.body?.text || "").trim();
+    if (!approvalId || !to.length || !subject || !text)
+        return res.status(400).json({ ok: false, error: "approvalId, recipient, subject, and text are required" });
+    try {
+        const delivery = await (0, connect_1.sendApprovedEmail)({ approvalId, to, subject, text });
+        return res.status(202).json({ ok: true, status: "queued", deliveryId: delivery.id || null });
+    }
+    catch (error) {
+        console.error("Approved email delivery failed:", error);
+        return res.status(502).json({ ok: false, error: "Could not deliver approved email" });
+    }
+});
 // Static assets referenced by index.html (logo, favicons, og:image) — the landing
 // page's SEO meta tags point at /assets/*, so these must actually resolve.
 app.use("/assets", express_1.default.static(path_1.default.join(__dirname, "..", "assets")));

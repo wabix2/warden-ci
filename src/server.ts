@@ -19,6 +19,7 @@ import { getInstallationClient } from "./github/appAuth";
 import { applyDependencyRemediation, manifestDiffIsScoped } from "./remediation/engine";
 import { createRemediationPullRequest } from "./remediation/github";
 import { resolveOsvAdvisory } from "./remediation/osv";
+import { sendApprovedEmail } from "./automation/connect";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -256,6 +257,31 @@ app.post(
 
   app.use(express.json({ limit: `${MAX_BODY_BYTES}b` }));
 
+
+function requireWardenToken(req: Request, res: Response): boolean {
+  const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+  if (!process.env.WARDEN_API_TOKEN || token !== process.env.WARDEN_API_TOKEN) {
+    res.status(401).json({ ok: false, error: "Unauthorized" });
+    return false;
+  }
+  return true;
+}
+
+app.post("/api/automation/approvals/:approvalId/send", async (req: Request, res: Response) => {
+  if (!requireWardenToken(req, res)) return;
+  const approvalId = String(req.params.approvalId || "").trim();
+  const to = Array.isArray(req.body?.to) ? req.body.to.filter((value: unknown): value is string => typeof value === "string" && value.includes("@")) : [];
+  const subject = String(req.body?.subject || "").trim();
+  const text = String(req.body?.text || "").trim();
+  if (!approvalId || !to.length || !subject || !text) return res.status(400).json({ ok: false, error: "approvalId, recipient, subject, and text are required" });
+  try {
+    const delivery = await sendApprovedEmail({ approvalId, to, subject, text });
+    return res.status(202).json({ ok: true, status: "queued", deliveryId: delivery.id || null });
+  } catch (error) {
+    console.error("Approved email delivery failed:", error);
+    return res.status(502).json({ ok: false, error: "Could not deliver approved email" });
+  }
+});
 
 // Static assets referenced by index.html (logo, favicons, og:image) — the landing
 // page's SEO meta tags point at /assets/*, so these must actually resolve.
