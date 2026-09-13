@@ -314,7 +314,7 @@
           </h1>
 
           <p class="text-lg text-slate-400 mb-8 max-w-xl leading-relaxed">
-            Warden CI scans every pull request the moment it opens — flags npm and PyPI imports that don't exist on the real registry, hardcoded secrets, and unguarded <code class="font-mono text-slate-300 bg-white/5 px-1.5 py-0.5 rounded">eval()</code> — then posts the result straight to your GitHub check. Nothing about your code is stored.
+            Warden CI scans every pull request the moment it opens, explains the evidence behind each finding, and guides safe remediation from proposal to validated branch and pull request. Dependency fixes are verified only after a fresh re-scan; secrets and unsafe code stay human-reviewed. Nothing about your code is stored.
           </p>
 
           <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-9">

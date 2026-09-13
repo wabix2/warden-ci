@@ -20,6 +20,7 @@ import { applyDependencyRemediation, manifestDiffIsScoped } from "./remediation/
 import { createRemediationPullRequest } from "./remediation/github";
 import { resolveOsvAdvisory } from "./remediation/osv";
 import { sendGmailMessage } from "./outreach/gmail";
+import { buildSafeDraft, parseOptInAudience } from "./outreach/audience";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -331,9 +332,11 @@ app.post("/api/runs/:runId/findings/:findingId/fix", async (req: Request, res: R
     const row = (await db.select({ finding: findings, repository: repositories, installation: installations }).from(findings).innerJoin(scanRuns, eq(findings.scanRunId, scanRuns.id)).innerJoin(repositories, eq(scanRuns.repositoryId, repositories.id)).innerJoin(installations, eq(repositories.installationId, installations.id)).where(and(eq(findings.id, findingId), eq(findings.scanRunId, runId))).limit(1))[0];
     if (!row) return res.status(404).json({ ok: false, error: "Finding not found" });
     const finding = row.finding;
-    if (!finding.packageName || !finding.ecosystem || !finding.currentVersion || !finding.manifestPath) return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "Finding metadata is insufficient for safe remediation" });
+    if (!finding.packageName || !finding.ecosystem || !finding.currentVersion || !finding.manifestPath) {
+      return res.status(202).json({ ok: true, status: "fix_proposed", verificationStatus: "human_review_required", error: "This finding requires a reviewed remediation proposal" });
+    }
     const ecosystem = finding.ecosystem === "pypi" ? "python" : finding.ecosystem === "npm" ? "npm" : null;
-    if (!ecosystem) return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "Unsupported remediation ecosystem" });
+    if (!ecosystem) return res.status(202).json({ ok: true, status: "fix_proposed", verificationStatus: "human_review_required", error: "This finding requires a reviewed remediation proposal" });
     const userToken = await sessionTokenFromRequest(req);
     if (!userToken) return res.status(401).json({ ok: false, error: "GitHub login required" });
     const writeAccess = await authorizeInstallationRepositoryWrite(userToken, row.installation.githubInstallationId, row.repository.githubRepositoryId, fetch);
@@ -351,18 +354,24 @@ app.post("/api/runs/:runId/findings/:findingId/fix", async (req: Request, res: R
     const before = Buffer.from(file.data.content, "base64").toString("utf8");
     const result = applyDependencyRemediation({ ecosystem, packageName: finding.packageName, vulnerableRange: advisory.affectedRange, targetVersion: advisory.fixedVersion, manifestPath: finding.manifestPath, manifestContent: before });
     if (!manifestDiffIsScoped(before, result.manifestContent, finding.packageName)) return res.status(409).json({ ok: false, status: "verification_failed", error: "Remediation changed more than the intended dependency" });
-    const remediation = await db.insert(remediations).values({ findingId, installationId: row.repository.installationId, repositoryId: row.repository.id, packageName: finding.packageName, targetVersion: advisory.fixedVersion, status: "creating" }).onConflictDoNothing().returning({ id: remediations.id });
+    const remediation = await db.insert(remediations).values({ findingId, installationId: row.repository.installationId, repositoryId: row.repository.id, packageName: finding.packageName, targetVersion: advisory.fixedVersion, status: "validation_passed", verificationStatus: "pending_rescan" }).onConflictDoNothing().returning({ id: remediations.id });
     const created = remediation[0];
+    if (!created) return res.status(200).json({ ok: true, status: "fix_proposed", verificationStatus: "pending_rescan", error: "An identical remediation is already in progress" });
     const pr = await createRemediationPullRequest(octokit, { owner, repo, baseBranch: row.repository.defaultBranch, baseSha: base.data.commit.sha, runId, findingId, reportUrl: `${process.env.PUBLIC_BASE_URL || ""}/details?runId=${runId}`, advisoryId: advisory.id, result });
-    const verification = await resolveOsvAdvisory(ecosystem, finding.packageName, advisory.fixedVersion);
-    const verificationStatus = verification ? "verification_failed" : "verified_fixed";
-    const remediationStatus = verification ? "verification_failed" : "verified_fixed";
-    await db.update(remediations).set({ status: remediationStatus, branchName: pr.branch, pullRequestNumber: pr.pullRequestNumber, pullRequestUrl: pr.pullRequestUrl, verificationStatus, updatedAt: new Date() }).where(created ? eq(remediations.id, created.id) : and(eq(remediations.findingId, findingId), eq(remediations.targetVersion, advisory.fixedVersion)));
-    return res.status(201).json({ ok: true, status: remediationStatus, pullRequestUrl: pr.pullRequestUrl, pullRequestNumber: pr.pullRequestNumber });
+    await db.update(remediations).set({ status: "pr_created", branchName: pr.branch, pullRequestNumber: pr.pullRequestNumber, pullRequestUrl: pr.pullRequestUrl, verificationStatus: "pending_rescan", updatedAt: new Date() }).where(eq(remediations.id, created.id));
+    return res.status(201).json({ ok: true, status: "pr_created", verificationStatus: "pending_rescan", pullRequestUrl: pr.pullRequestUrl, pullRequestNumber: pr.pullRequestNumber });
   } catch (error) {
     console.error("Remediation request failed:", error);
     return res.status(502).json({ ok: false, error: "Could not evaluate remediation request" });
   }
+});
+
+app.get("/api/remediations/:remediationId", async (req: Request, res: Response) => {
+  const session = await getOAuthSession(req);
+  if (!session || !db || !isUuid(String(req.params.remediationId || ""))) return res.status(404).json({ ok: false, error: "Remediation not found" });
+  const remediation = (await db.select({ remediation: remediations, installationLogin: installations.accountLogin }).from(remediations).innerJoin(installations, eq(remediations.installationId, installations.id)).where(eq(remediations.id, String(req.params.remediationId))).limit(1))[0];
+  if (!remediation || remediation.installationLogin.toLowerCase() !== session.login.toLowerCase()) return res.status(404).json({ ok: false, error: "Remediation not found" });
+  return res.json({ ok: true, remediation: remediation.remediation, canBeVerified: remediation.remediation.status === "pr_created" && remediation.remediation.verificationStatus === "pending_rescan" });
 });
 
 app.get("/details", (req: Request, res: Response) => {
@@ -449,16 +458,34 @@ app.put("/api/telemetry/settings", async (req: Request, res: Response) => {
   } catch (error) { console.error("Telemetry settings write failed:", error); return res.status(502).json({ ok: false, error: "Could not update telemetry settings" }); }
 });
 
+app.post("/api/outreach/draft", async (req: Request, res: Response) => {
+  if (!await getOAuthSession(req)) return res.status(401).json({ ok: false, error: "GitHub login required" });
+  return res.json({ ok: true, draft: buildSafeDraft(req.body || {}) });
+});
+
+app.post("/api/outreach/validate", async (req: Request, res: Response) => {
+  if (!await getOAuthSession(req)) return res.status(401).json({ ok: false, error: "GitHub login required" });
+  try {
+    const recipients = parseOptInAudience(String(req.body?.csv || ""));
+    if (recipients.length === 0 || recipients.length > 50) return res.status(400).json({ ok: false, error: "Upload between 1 and 50 opted-in recipients" });
+    return res.json({ ok: true, count: recipients.length, recipients: recipients.map(({ email, name, company }) => ({ email, name, company })) });
+  } catch (error) { return res.status(400).json({ ok: false, error: error instanceof Error ? error.message : "Invalid audience" }); }
+});
+
 app.post("/api/outreach/send", async (req: Request, res: Response) => {
   const session = await getOAuthSession(req);
   if (!session) return res.status(401).json({ ok: false, error: "GitHub login required" });
-  const body = req.body as { from?: string; to?: string; subject?: string; html?: string; consent?: boolean; approved?: boolean };
-  if (!body.approved || !body.consent) return res.status(409).json({ ok: false, error: "Human approval and recipient consent are required" });
-  if (!body.from || !body.to || !body.subject || !body.html) return res.status(400).json({ ok: false, error: "from, to, subject, and html are required" });
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.to) || body.to.length > 320) return res.status(400).json({ ok: false, error: "Invalid recipient" });
+  const body = req.body as { from?: string; recipients?: Array<{ email: string; consent: boolean }>; subject?: string; html?: string; approved?: boolean };
+  if (!body.approved) return res.status(409).json({ ok: false, error: "Human approval is required" });
+  if (!body.from || !body.recipients?.length || body.recipients.length > 50 || !body.subject || !body.html) return res.status(400).json({ ok: false, error: "from, recipients, subject, and html are required" });
+  if (body.recipients.some((recipient) => !recipient.consent || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(recipient.email))) return res.status(400).json({ ok: false, error: "Every recipient must be valid and opted in" });
   try {
-    await sendGmailMessage({ id: `github:${session.login}`, issuer: "github" }, { from: body.from, to: body.to, subject: body.subject, html: body.html });
-    return res.status(202).json({ ok: true, status: "accepted", recipient: body.to });
+    const sent: string[] = [];
+    for (const recipient of body.recipients) {
+      await sendGmailMessage({ id: `github:${session.login}`, issuer: "github" }, { from: body.from, to: recipient.email, subject: body.subject, html: body.html });
+      sent.push(recipient.email);
+    }
+    return res.status(202).json({ ok: true, status: "accepted", sent });
   } catch (error) {
     console.error(JSON.stringify({ event: "outreach_send_failed", requestId: res.locals.requestId, error: error instanceof Error ? error.message : "unknown" }));
     return res.status(502).json({ ok: false, error: "Gmail authorization or delivery failed" });
