@@ -15,6 +15,7 @@ const db_1 = require("./db");
 const schema_1 = require("./db/schema");
 const webhookHandler_1 = require("./github/webhookHandler");
 const redis_1 = require("./lib/redis");
+const store_2 = require("./billing/store");
 const popularPackageRefresh_1 = require("./scan/popularPackageRefresh");
 const corpusLog_1 = require("./telemetry/corpusLog");
 const runAccess_1 = require("./auth/runAccess");
@@ -337,6 +338,29 @@ app.get("/auth/github/callback", async (req, res) => {
     catch (error) {
         console.error("GitHub OAuth callback failed:", error);
         return res.status(502).send("GitHub OAuth is unavailable");
+    }
+});
+app.get("/api/billing/status", async (req, res) => {
+    const installationId = Number(req.query.installationId);
+    if (!Number.isSafeInteger(installationId) || installationId <= 0)
+        return res.status(400).json({ ok: false, error: "Invalid installation ID" });
+    try {
+        const authorized = await dashboardInstallation(req, installationId);
+        if (authorized === null)
+            return res.status(401).json({ ok: false, error: "GitHub login required" });
+        if (!authorized)
+            return res.status(403).json({ ok: false, error: "Installation is not authorized for this GitHub account" });
+        if (!db_1.db)
+            return res.status(503).json({ ok: false, error: "Database unavailable" });
+        const installation = (await db_1.db.select({ accountLogin: schema_1.installations.accountLogin, plan: schema_1.installations.plan }).from(schema_1.installations).where((0, drizzle_orm_1.eq)(schema_1.installations.githubInstallationId, installationId)).limit(1))[0];
+        if (!installation)
+            return res.status(404).json({ ok: false, error: "Installation not found" });
+        const record = await (0, store_2.getProRecord)(installation.accountLogin);
+        return res.json({ ok: true, plan: record?.status === "active" || record?.status === "trialing" ? record.plan : installation.plan, status: record?.status || "free", updatedAt: record?.updatedAt || null });
+    }
+    catch (error) {
+        console.error("Billing status read failed:", error);
+        return res.status(502).json({ ok: false, error: "Could not load billing status" });
     }
 });
 app.get("/api/telemetry/settings", async (req, res) => {
