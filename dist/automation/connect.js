@@ -1,20 +1,23 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getGmailToken = getGmailToken;
+exports.startGmailAuthorization = startGmailAuthorization;
 exports.getResendToken = getResendToken;
 exports.sendGmailCampaignEmail = sendGmailCampaignEmail;
 exports.sendApprovedEmail = sendApprovedEmail;
 // Loaded dynamically because this project compiles CommonJS with legacy module resolution.
-const { getToken } = require("@vercel/connect");
+const { getToken, startAuthorization } = require("@vercel/connect");
 const GMAIL_CONNECTOR = "google/warden-support-gmail";
 const RESEND_CONNECTOR = "api.resend.com/warden-support-email";
 async function getGmailToken(subjectId) {
-    const result = await getToken(GMAIL_CONNECTOR, { subject: { type: "user", id: subjectId } });
-    return result.token;
+    return getToken(GMAIL_CONNECTOR, { subject: { type: "user", id: subjectId } });
+}
+async function startGmailAuthorization(subjectId, callbackUrl) {
+    const result = await startAuthorization(GMAIL_CONNECTOR, { subject: { type: "user", id: subjectId }, scopes: ["https://www.googleapis.com/auth/gmail.send"] }, { callbackUrl });
+    return result.url;
 }
 async function getResendToken() {
-    const result = await getToken(RESEND_CONNECTOR, { subject: { type: "app" } });
-    return result.token;
+    return getToken(RESEND_CONNECTOR, { subject: { type: "app" } });
 }
 async function sendGmailCampaignEmail(input) {
     const token = await getGmailToken(input.subjectId);

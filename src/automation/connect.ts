@@ -1,17 +1,20 @@
 // Loaded dynamically because this project compiles CommonJS with legacy module resolution.
-const { getToken } = require("@vercel/connect") as { getToken: (uid: string, options: { subject: { type: "user" | "app"; id?: string } }) => Promise<{ token: string }> };
+const { getToken, startAuthorization } = require("@vercel/connect") as { getToken: (uid: string, options: { subject: { type: "user"; id: string } | { type: "app" } }) => Promise<string>; startAuthorization: (uid: string, params: { subject: { type: "user"; id: string }; scopes?: string[] }, options: { callbackUrl: string }) => Promise<{ url: string }> };
 
 const GMAIL_CONNECTOR = "google/warden-support-gmail";
 const RESEND_CONNECTOR = "api.resend.com/warden-support-email";
 
 export async function getGmailToken(subjectId: string): Promise<string> {
-  const result = await getToken(GMAIL_CONNECTOR, { subject: { type: "user", id: subjectId } });
-  return result.token;
+  return getToken(GMAIL_CONNECTOR, { subject: { type: "user", id: subjectId } });
+}
+
+export async function startGmailAuthorization(subjectId: string, callbackUrl: string): Promise<string> {
+  const result = await startAuthorization(GMAIL_CONNECTOR, { subject: { type: "user", id: subjectId }, scopes: ["https://www.googleapis.com/auth/gmail.send"] }, { callbackUrl });
+  return result.url;
 }
 
 export async function getResendToken(): Promise<string> {
-  const result = await getToken(RESEND_CONNECTOR, { subject: { type: "app" } });
-  return result.token;
+  return getToken(RESEND_CONNECTOR, { subject: { type: "app" } });
 }
 
 export async function sendGmailCampaignEmail(input: { subjectId: string; to: string; subject: string; html: string; campaignId: string; unsubscribeUrl: string }) {

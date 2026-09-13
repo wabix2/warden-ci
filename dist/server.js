@@ -242,6 +242,44 @@ function requireWardenToken(req, res) {
     }
     return true;
 }
+async function gmailSubjectId(req) {
+    const sessionToken = await (0, runAccess_1.sessionTokenFromRequest)(req);
+    if (!sessionToken)
+        return null;
+    const response = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${sessionToken}`, Accept: "application/vnd.github+json" } });
+    if (!response.ok)
+        return null;
+    const user = await response.json();
+    return user.id ? `github:${user.id}` : null;
+}
+app.get("/api/automation/gmail/status", async (req, res) => {
+    const subjectId = await gmailSubjectId(req);
+    if (!subjectId)
+        return res.status(401).json({ ok: false, connected: false, error: "Sign in to Warden first" });
+    try {
+        await (0, connect_1.getGmailToken)(subjectId);
+        return res.json({ ok: true, connected: true });
+    }
+    catch {
+        return res.json({ ok: true, connected: false });
+    }
+});
+app.get("/api/automation/gmail/connect", async (req, res) => {
+    const subjectId = await gmailSubjectId(req);
+    if (!subjectId)
+        return res.status(401).json({ ok: false, error: "Sign in to Warden first" });
+    try {
+        const url = await (0, connect_1.startGmailAuthorization)(subjectId, `${canonicalOrigin(req)}/api/automation/gmail/callback`);
+        return res.json({ ok: true, url });
+    }
+    catch (error) {
+        console.error("Gmail authorization start failed:", error);
+        return res.status(502).json({ ok: false, error: "Could not start Gmail authorization" });
+    }
+});
+app.get("/api/automation/gmail/callback", (_req, res) => {
+    res.type("html").send("<!doctype html><html><body style=\"font-family:system-ui;max-width:560px;margin:48px auto;padding:16px\"><h1>Gmail connected</h1><p>You can close this window and return to the Warden control room.</p></body></html>");
+});
 app.post("/api/automation/approvals/:approvalId/send", async (req, res) => {
     if (!requireWardenToken(req, res))
         return;
@@ -278,7 +316,7 @@ app.post("/api/automation/campaigns/:campaignId/send", async (req, res) => {
     const subject = String(req.body?.subject || "").trim();
     const html = String(req.body?.html || "").trim();
     const authorized = req.body?.authorizationConfirmed === true;
-    const subjectId = String(process.env.WARDEN_GMAIL_SUBJECT_ID || "").trim();
+    const subjectId = await gmailSubjectId(req);
     const unsubscribeUrl = `${process.env.PUBLIC_BASE_URL || ""}/api/automation/unsubscribe?campaign=${encodeURIComponent(campaignId)}`;
     const campaignHtml = html.replaceAll("{{UNSUBSCRIBE_URL}}", unsubscribeUrl);
     if (!campaignId || !recipients.length || recipients.length > 100 || !subject || !html || !authorized)
