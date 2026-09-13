@@ -26,5 +26,5 @@ const response = await fetch(new URL("/api/scan", baseUrl), {
   body: JSON.stringify({ files }),
 });
 const result = await response.json();
-console.log(JSON.stringify(result, null, 2));
+console.log(JSON.stringify({ ...result, customerReportUrl: `${baseUrl.replace(/\/$/, "")}/details?runId=${process.env.GITHUB_RUN_ID || "latest"}`, upgradeUrl: `${baseUrl.replace(/\/$/, "")}/upgrade` }, null, 2));
 process.exit(response.ok && result.verdict !== "fail" ? 0 : 1);

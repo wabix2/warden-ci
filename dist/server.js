@@ -467,6 +467,10 @@ app.get("/details", (req, res) => {
 app.get("/dashboard", (_req, res) => {
     res.sendFile(path_1.default.join(__dirname, "..", "dashboard.html"));
 });
+app.get("/upgrade", (_req, res) => {
+    const checkout = process.env.GUMROAD_CHECKOUT_PRO || "https://gumroad.com/l/warden-ci-pro";
+    res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Upgrade to Warden CI Pro</title><style>body{font-family:system-ui,sans-serif;background:#090d12;color:#e5e7eb;margin:0;padding:32px}main{max-width:760px;margin:auto}a{display:inline-block;background:#f59e0b;color:#111827;padding:12px 16px;border-radius:8px;text-decoration:none;font-weight:700}.card{border:1px solid #263241;border-radius:12px;padding:24px;background:#111821}.muted{color:#94a3b8}</style></head><body><main><p class="muted">Warden security gate</p><div class="card"><h1>Upgrade to Pro</h1><p>Enable private-repository scanning, complete security reports, and verified remediation workflows for your GitHub repositories.</p><p><strong>$19/month</strong></p><a href="${checkout}">Upgrade to Warden CI Pro</a></div></main></body></html>`);
+});
 app.get("/auth/github", async (_req, res) => {
     const clientId = process.env.GITHUB_OAUTH_CLIENT_ID;
     if (!clientId)
