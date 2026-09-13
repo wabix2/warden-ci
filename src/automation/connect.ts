@@ -14,6 +14,30 @@ export async function getResendToken(): Promise<string> {
   return result.token;
 }
 
+export async function sendGmailCampaignEmail(input: { subjectId: string; to: string; subject: string; html: string; campaignId: string; unsubscribeUrl: string }) {
+  const token = await getGmailToken(input.subjectId);
+  const headers = [
+    `From: ${process.env.WARDEN_GMAIL_FROM || "Warden CI"}`,
+    `To: ${input.to}`,
+    `Subject: ${input.subject}`,
+    "MIME-Version: 1.0",
+    "Content-Type: text/html; charset=UTF-8",
+    `List-Unsubscribe: <${input.unsubscribeUrl}>`,
+    `List-Unsubscribe-Post: List-Unsubscribe=One-Click`,
+    "",
+    input.html,
+  ].join("\\r\\n");
+  const encoded = Buffer.from(headers).toString("base64url");
+  const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Idempotency-Key": `warden-campaign/${input.campaignId}/${input.to}` },
+    body: JSON.stringify({ raw: encoded }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(`Gmail delivery failed (${response.status}): ${body?.error?.message || "provider rejected message"}`);
+  return body as { id?: string; threadId?: string };
+}
+
 export async function sendApprovedEmail(input: { to: string[]; subject: string; text: string; approvalId: string }) {
   const token = await getResendToken();
   const response = await fetch("https://api.resend.com/emails", {

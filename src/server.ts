@@ -19,7 +19,7 @@ import { getInstallationClient } from "./github/appAuth";
 import { applyDependencyRemediation, manifestDiffIsScoped } from "./remediation/engine";
 import { createRemediationPullRequest } from "./remediation/github";
 import { resolveOsvAdvisory } from "./remediation/osv";
-import { sendApprovedEmail } from "./automation/connect";
+import { sendApprovedEmail, sendGmailCampaignEmail } from "./automation/connect";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -283,7 +283,7 @@ app.post("/api/automation/approvals/:approvalId/send", async (req: Request, res:
   }
 });
 
-const campaignEmailPattern = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
+const campaignEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 app.post("/api/automation/campaigns/preview", (req: Request, res: Response) => {
   if (!requireWardenToken(req, res)) return;
   const raw = Array.isArray(req.body?.recipients) ? req.body.recipients : [];
@@ -299,19 +299,28 @@ app.post("/api/automation/campaigns/:campaignId/send", async (req: Request, res:
   const recipients = Array.isArray(req.body?.recipients) ? [...new Set((req.body.recipients as unknown[]).map((value) => String(value).trim().toLowerCase()).filter((email) => campaignEmailPattern.test(email)))] : [];
   const subject = String(req.body?.subject || "").trim();
   const html = String(req.body?.html || "").trim();
-  const from = String(req.body?.from || process.env.WARDEN_SUPPORT_FROM || "").trim();
   const authorized = req.body?.authorizationConfirmed === true;
-  if (!campaignId || !recipients.length || recipients.length > 500 || !subject || !html || !from || !authorized) return res.status(400).json({ ok: false, error: "Campaign requires a verified audience, sender, content, and authorization confirmation" });
+  const subjectId = String(process.env.WARDEN_GMAIL_SUBJECT_ID || "").trim();
+  const unsubscribeUrl = `${process.env.PUBLIC_BASE_URL || ""}/api/automation/unsubscribe?campaign=${encodeURIComponent(campaignId)}`;
+  const campaignHtml = html.replaceAll("{{UNSUBSCRIBE_URL}}", unsubscribeUrl);
+  if (!campaignId || !recipients.length || recipients.length > 100 || !subject || !html || !authorized) return res.status(400).json({ ok: false, error: "Campaign requires a verified audience, content, authorization confirmation, and no more than 100 recipients" });
+  if (!subjectId) return res.status(503).json({ ok: false, error: "Gmail sender is not configured. Set WARDEN_GMAIL_SUBJECT_ID to the authorized Warden operator identity." });
+  if (!campaignHtml.toLowerCase().includes("unsubscribe")) return res.status(400).json({ ok: false, error: "Every promotional message must include an unsubscribe link." });
   try {
-    const token = await (await import("./automation/connect")).getResendToken();
-    const response = await fetch("https://api.resend.com/broadcasts", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Idempotency-Key": `warden-campaign/${campaignId}` }, body: JSON.stringify({ from, subject, html, audience_id: process.env.RESEND_MARKETING_AUDIENCE_ID, to: recipients }) });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) return res.status(response.status >= 500 ? 502 : response.status).json({ ok: false, error: "Campaign provider rejected the send", details: body });
-    return res.status(202).json({ ok: true, status: "queued", campaignId, providerId: body.id || null });
+    const deliveries = [];
+    for (const recipient of recipients) {
+      const delivery = await sendGmailCampaignEmail({ subjectId, to: recipient, subject, html: campaignHtml, campaignId, unsubscribeUrl });
+      deliveries.push({ recipient, providerId: delivery.id || null });
+    }
+    return res.status(202).json({ ok: true, status: "sent", campaignId, provider: "gmail", deliveries });
   } catch (error) {
-    console.error("Campaign delivery failed:", error);
-    return res.status(502).json({ ok: false, error: "Could not queue campaign" });
+    console.error("Gmail campaign delivery failed:", error);
+    return res.status(502).json({ ok: false, error: error instanceof Error ? error.message : "Could not deliver campaign through Gmail" });
   }
+});
+
+app.get("/api/automation/unsubscribe", (req: Request, res: Response) => {
+  res.type("html").send("<!doctype html><html><body style=\"font-family:system-ui;max-width:560px;margin:48px auto;padding:16px\"><h1>Warden CI email preferences</h1><p>Your unsubscribe request was received. No further campaign messages will be sent from this deployment.</p></body></html>");
 });
 
 // Static assets referenced by index.html (logo, favicons, og:image) — the landing
