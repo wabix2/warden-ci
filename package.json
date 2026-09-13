@@ -16,6 +16,7 @@
     "test:ownership-backfill": "node --test scripts/test-ownership-backfill.mjs",
     "test:remediation": "pnpm build && node --test scripts/test-remediation-engine.mjs scripts/test-remediation-authorization.mjs scripts/test-osv-remediation.mjs scripts/test-remediation-github.mjs",
     "test:billing": "pnpm build && node --test scripts/test-billing-store.mjs",
+    "test:outreach": "pnpm build && node --test scripts/test-outreach-audience.mjs",
     "smoke:render": "node scripts/smoke-render.mjs"
   },
   "dependencies": {
