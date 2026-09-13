@@ -35,6 +35,21 @@ function secureCookie(req: Request): string {
   return req.secure || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
 }
 
+function signOAuthState(nonce: string): string {
+  const secret = process.env.GITHUB_OAUTH_CLIENT_SECRET;
+  if (!secret) throw new Error("GITHUB_OAUTH_CLIENT_SECRET is not configured");
+  const signature = createHmac("sha256", secret).update(nonce).digest("hex");
+  return `${nonce}.${signature}`;
+}
+
+function validOAuthState(state: string, expected: string): boolean {
+  if (!state || state !== expected) return false;
+  const [nonce, signature] = state.split(".");
+  if (!nonce || !signature || signature.length !== 64) return false;
+  const expectedSignature = createHmac("sha256", process.env.GITHUB_OAUTH_CLIENT_SECRET || "").update(nonce).digest("hex");
+  return timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature));
+}
+
 async function githubJson<T>(url: string, token: string): Promise<T> {
   const response = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" } });
   if (!response.ok) throw new Error(`GitHub OAuth request failed (${response.status})`);
@@ -304,16 +319,8 @@ app.get("/dashboard", (_req: Request, res: Response) => {
 app.get("/auth/github", async (_req: Request, res: Response) => {
   const clientId = process.env.GITHUB_OAUTH_CLIENT_ID;
   if (!clientId) return res.status(503).send("GitHub OAuth is not configured");
-  const state = randomBytes(24).toString("hex");
+  const state = signOAuthState(randomBytes(24).toString("hex"));
   const callback = `${process.env.PUBLIC_BASE_URL || `${_req.protocol}://${_req.get("host")}`}/auth/github/callback`;
-  try {
-    // Persist the state before redirecting. A fire-and-forget write creates a
-    // race where GitHub can complete OAuth before Redis contains the state.
-    await getRedisClient().set(`warden:oauth:state:${state}`, "1", { ex: 600 });
-  } catch (error) {
-    console.error("GitHub OAuth state persistence failed:", error);
-    return res.status(503).send("GitHub OAuth is temporarily unavailable");
-  }
   res.setHeader("Set-Cookie", `${OAUTH_STATE_COOKIE}=${state}; HttpOnly; SameSite=Lax; Path=/${secureCookie(_req)}`);
   return res.redirect(`https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(callback)}&state=${encodeURIComponent(state)}&scope=`);
 });
@@ -321,14 +328,8 @@ app.get("/auth/github", async (_req: Request, res: Response) => {
 app.get("/auth/github/callback", async (req: Request, res: Response) => {
   const state = String(req.query.state || "");
   const expected = cookieValue(req, OAUTH_STATE_COOKIE);
-  if (!state || !expected || state !== expected) return res.status(403).send("Invalid OAuth state");
-  const stateKey = `warden:oauth:state:${state}`;
-  const redis = getRedisClient();
-  const stateValue = await redis.get<string>(stateKey);
-  if (stateValue !== "1") return res.status(403).send("Invalid OAuth state");
-  // Consume the state before exchanging the code. A callback replay must fail
-  // even if the first request has not finished creating its session yet.
-  await redis.del(stateKey);
+  if (!expected || !validOAuthState(state, expected)) return res.status(403).send("Invalid OAuth state");
+  res.setHeader("Set-Cookie", `${OAUTH_STATE_COOKIE}=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/${secureCookie(req)}`);
   if (!req.query.code) return res.status(400).send("Missing OAuth code");
   try {
     const response = await fetch("https://github.com/login/oauth/access_token", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify({ client_id: process.env.GITHUB_OAUTH_CLIENT_ID, client_secret: process.env.GITHUB_OAUTH_CLIENT_SECRET, code: String(req.query.code || "") }) });
