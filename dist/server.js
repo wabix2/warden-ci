@@ -28,6 +28,23 @@ const PORT = Number(process.env.PORT || 3000);
 const OAUTH_STATE_COOKIE = "warden_oauth_state";
 const SESSION_COOKIE = "warden_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 8;
+const CANONICAL_BASE_URL = process.env.PUBLIC_BASE_URL?.trim().replace(/\/$/, "") || "";
+const REQUEST_TIMEOUT_MS = 15_000;
+const MAX_BODY_BYTES = 1_000_000;
+const MAX_REQUESTS_PER_WINDOW = 120;
+const requestBuckets = new Map();
+function requestId(req) {
+    const candidate = req.headers["x-request-id"];
+    return typeof candidate === "string" && /^[A-Za-z0-9._-]{1,100}$/.test(candidate) ? candidate : (0, node_crypto_1.randomBytes)(12).toString("hex");
+}
+function canonicalOrigin(req) {
+    if (CANONICAL_BASE_URL)
+        return CANONICAL_BASE_URL;
+    return `${req.protocol}://${req.get("host")}`.replace(/\/$/, "");
+}
+function withTimeout(promise, timeoutMs = REQUEST_TIMEOUT_MS) {
+    return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("Upstream request timed out")), timeoutMs))]);
+}
 function cookieValue(req, name) {
     const header = req.headers.cookie ?? "";
     return header.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1);
@@ -52,7 +69,7 @@ function validOAuthState(state, expected) {
     return (0, node_crypto_1.timingSafeEqual)(Buffer.from(signature), Buffer.from(expectedSignature));
 }
 async function githubJson(url, token) {
-    const response = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" } });
+    const response = await withTimeout(fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" } }));
     if (!response.ok)
         throw new Error(`GitHub OAuth request failed (${response.status})`);
     return await response.json();
@@ -182,8 +199,40 @@ app.post("/billing/webhook", express_1.default.urlencoded({ extended: false }), 
 // same reasoning as the Gumroad webhook above, registered before express.json() for
 // the same reason: JSON.stringify(JSON.parse(body)) is not guaranteed to byte-match
 // what GitHub actually signed.
-app.post("/api/github/webhooks", express_1.default.raw({ type: "application/json" }), webhookHandler_1.handlePullRequestWebhook);
-app.use(express_1.default.json());
+app.post("/api/github/webhooks", express_1.default.raw({ type: "application/json" }), async (req, res) => {
+    try {
+        await withTimeout((0, webhookHandler_1.handlePullRequestWebhook)(req, res));
+    }
+    catch (error) {
+        console.error(JSON.stringify({ event: "webhook_failed", error: error instanceof Error ? error.message : "unknown" }));
+        if (!res.headersSent)
+            res.status(504).json({ ok: false, error: "Webhook processing timed out or failed" });
+    }
+});
+app.use((req, res, next) => {
+    const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown").split(",")[0].trim();
+    const now = Date.now();
+    const bucket = requestBuckets.get(ip);
+    const current = !bucket || now - bucket.startedAt >= 60_000 ? { startedAt: now, count: 0 } : bucket;
+    current.count += 1;
+    requestBuckets.set(ip, current);
+    if (current.count > MAX_REQUESTS_PER_WINDOW)
+        return res.status(429).json({ ok: false, error: "Too many requests" });
+    const id = requestId(req);
+    res.setHeader("X-Request-Id", id);
+    res.locals.requestId = id;
+    const started = Date.now();
+    res.on("finish", () => console.info(JSON.stringify({ event: "http_request", requestId: id, method: req.method, path: req.path, status: res.statusCode, durationMs: Date.now() - started })));
+    next();
+});
+app.get("/health", (_req, res) => res.status(200).json({ ok: true, service: "warden", status: "live" }));
+app.get("/ready", (_req, res) => {
+    const redisReady = Boolean(process.env.UPSTASH_REDIS_REST_URL?.trim() && process.env.UPSTASH_REDIS_REST_TOKEN?.trim());
+    const githubReady = Boolean(process.env.GITHUB_APP_ID?.trim() && process.env.GITHUB_PRIVATE_KEY?.trim() && process.env.GITHUB_WEBHOOK_SECRET?.trim());
+    const ready = redisReady && githubReady;
+    return res.status(ready ? 200 : 503).json({ ok: ready, status: ready ? "ready" : "degraded", dependencies: { redis: redisReady, github: githubReady } });
+});
+app.use(express_1.default.json({ limit: `${MAX_BODY_BYTES}b` }));
 // Static assets referenced by index.html (logo, favicons, og:image) — the landing
 // page's SEO meta tags point at /assets/*, so these must actually resolve.
 app.use("/assets", express_1.default.static(path_1.default.join(__dirname, "..", "assets")));
@@ -313,7 +362,7 @@ app.get("/auth/github", async (_req, res) => {
     if (!clientId)
         return res.status(503).send("GitHub OAuth is not configured");
     const state = signOAuthState((0, node_crypto_1.randomBytes)(24).toString("hex"));
-    const callback = `${process.env.PUBLIC_BASE_URL || `${_req.protocol}://${_req.get("host")}`}/auth/github/callback`;
+    const callback = `${canonicalOrigin(_req)}/auth/github/callback`;
     res.setHeader("Set-Cookie", `${OAUTH_STATE_COOKIE}=${state}; HttpOnly; SameSite=Lax; Path=/${secureCookie(_req)}`);
     return res.redirect(`https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(callback)}&state=${encodeURIComponent(state)}&scope=`);
 });
@@ -675,7 +724,7 @@ app.post("/api/scan", async (req, res) => {
     if (files.length === 0 || files.length > 250)
         return res.status(400).json({ ok: false, error: "files must contain 1-250 changed files" });
     try {
-        const result = await (0, scan_1.scanFiles)(files);
+        const result = await withTimeout((0, scan_1.scanFiles)(files));
         const policy = (0, enterprise_1.evaluatePolicy)(result, enterprise_1.defaultScanPolicy);
         const format = String(req.query.format || "json");
         const payload = format === "sarif" ? (0, enterprise_1.toSarif)(result) : format === "cyclonedx" ? (0, enterprise_1.toCycloneDx)(result) : { ok: true, ...result, policy };
@@ -683,8 +732,9 @@ app.post("/api/scan", async (req, res) => {
         return res.json(JSON.parse((0, enterprise_1.redact)(JSON.stringify(payload))));
     }
     catch (error) {
-        console.error("Scan API error:", error);
-        return res.status(500).json({ ok: false, error: "Scan failed" });
+        console.error(JSON.stringify({ event: "scan_failed", requestId: res.locals.requestId, error: error instanceof Error ? error.message : "unknown" }));
+        const timedOut = error instanceof Error && error.message.includes("timed out");
+        return res.status(timedOut ? 504 : 500).json({ ok: false, error: timedOut ? "Scan timed out" : "Scan failed", degraded: timedOut });
     }
 });
 app.get("/health", (_req, res) => {
