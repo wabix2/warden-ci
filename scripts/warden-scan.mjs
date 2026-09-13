@@ -2,7 +2,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-const baseUrl = process.env.WARDEN_URL;
+const baseUrl = (process.env.WARDEN_URL || "https://warden-ci-dvk5.onrender.com").replace(/\/$/, "");
 const token = process.env.WARDEN_API_TOKEN;
 if (!baseUrl || !token) {
   console.error("Set WARDEN_URL and WARDEN_API_TOKEN before running warden-scan.");
