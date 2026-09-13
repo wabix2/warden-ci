@@ -18,6 +18,8 @@ Keep Team and Enterprise hidden until the Pro onboarding and support process is 
 
 The product description should state that private-repository scanning is a paid feature and that the GitHub Actions check is named **Warden security gate**. Do not advertise the retired **Warden CI** check.
 
+Use `GUMROAD_PRODUCT_PRO.md` as the complete product listing copy. Upload these generated assets in order: `public/assets/warden-ci-pro-cover.png`, `public/assets/warden-ci-pro-features.png`, and `public/assets/warden-ci-pro-social.png`. The app does not store or expose Gumroad credentials; configure checkout URL and product ID through the existing environment variables.
+
 ## 4. Gumroad webhook
 
 Configure Gumroad’s ping notification URL as:
