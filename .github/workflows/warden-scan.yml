@@ -24,4 +24,12 @@ jobs:
         env:
           WARDEN_URL: ${{ secrets.WARDEN_URL }}
           WARDEN_API_TOKEN: ${{ secrets.WARDEN_API_TOKEN }}
-        run: node scripts/warden-scan.mjs warden.patch
+        run: |
+          node scripts/warden-scan.mjs warden.patch
+          {
+            echo "## Warden security gate"
+            echo ""
+            echo "Open the customer-facing report: $WARDEN_URL/details?runId=${{ github.run_id }}"
+            echo ""
+            echo "Private-repository scanning and verified remediation require Warden CI Pro: $WARDEN_URL/upgrade"
+          } >> "$GITHUB_STEP_SUMMARY"

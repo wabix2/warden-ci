@@ -1,5 +1,5 @@
 /**
- * Warden CI — pull_request webhook handler.
+ * Warden security gate — pull_request webhook handler.
  *
  * Flow per event:
  *  1. Verify the GitHub signature on the raw body.
@@ -94,9 +94,13 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
   // Respond to GitHub immediately; do the scan work after. GitHub expects a
   // fast response and will retry deliveries that time out, which would cause
   // duplicate Check Runs otherwise.
-  res.status(202).send("Accepted");
+  // GitHub Actions is the canonical Warden security gate. The legacy GitHub App
+  // webhook remains installed for compatibility but must not create a second
+  // check run or show the retired Warden security gate billing experience.
+  res.status(204).send();
+  return;
 
-  try {
+  /*
     const deliveryId = String(req.headers["x-github-delivery"] || "").trim();
     if (deliveryId) {
       const claimed = await getRedisClient().set(`warden:delivery:${deliveryId}`, "1", { nx: true, ex: 86400 });
@@ -175,15 +179,15 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
       await octokit.checks.create({
         owner,
         repo,
-        name: "Warden CI",
+        name: "Warden security gate",
         head_sha: headSha,
         status: "completed",
         conclusion: "neutral",
         output: {
           title: "Upgrade to scan private repositories",
           summary:
-            "Warden CI scans public repositories for free. This is a private repository, " +
-            "which requires an active Pro (or higher) plan. Visit /subscribe on your Warden CI " +
+            "Warden security gate scans public repositories for free. This is a private repository, " +
+            "which requires an active Pro (or higher) plan. Visit /subscribe on your Warden security gate " +
             "deployment to upgrade — the scan will run automatically on the next push once billing is active.",
         },
       });
@@ -193,7 +197,7 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
     const checkRun = await octokit.checks.create({
       owner,
       repo,
-      name: "Warden CI",
+      name: "Warden security gate",
       head_sha: headSha,
       status: "in_progress",
       output: { title: "Warden is scanning this pull request", summary: "Fetching changed files and evaluating policy." },
@@ -274,7 +278,5 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
         )
       );
     }
-  } catch (err) {
-    console.error("Warden CI scan failed:", err);
-  }
+  */
 }
