@@ -16,7 +16,6 @@
     <section class="grid"><article class="panel"><h2>Telemetry settings</h2><p class="run-meta">Sign in with GitHub to manage the Warden App installation you control.</p><div class="policy"><label for="installation-id">Installation ID</label><input id="installation-id" inputmode="numeric" placeholder="GitHub installation ID" style="background:var(--surface-2);border:1px solid var(--line);color:var(--text);padding:8px;border-radius:8px;width:180px" /></div><div class="policy"><span>Public scan corpus</span><button id="public-toggle" class="switch" type="button">Sign in first</button></div><div class="policy"><span>Private scan corpus</span><button id="private-toggle" class="switch" type="button">Sign in first</button></div><p id="telemetry-status" class="run-meta"></p><a class="switch" href="/auth/github">Connect GitHub</a></article><article class="panel"><h2>Recent gate decisions</h2><div class="notice">Live scan history appears here after the GitHub App is installed and the first protected pull request is evaluated. Warden does not display fabricated security metrics.</div></article><aside class="panel"><h2>Active policy</h2><div class="policy"><span>Mode</span><span class="switch">BLOCK</span></div><div class="policy"><span>Secrets</span><span class="switch">ON</span></div><div class="policy"><span>Malicious packages</span><span class="switch">ON</span></div><div class="policy"><span>Dangerous exec</span><span class="switch">ON</span></div><div class="policy"><span>Minimum severity</span><span class="switch">HIGH</span></div><div class="notice">Fail closed: if billing or policy storage is unavailable, private-repository scans do not silently become free.</div></aside></section>
   </main>
   <script>
-    const token = window.prompt("Warden dashboard token");
     const installationInput = document.getElementById('installation-id');
     const publicToggle = document.getElementById('public-toggle');
     const privateToggle = document.getElementById('private-toggle');
@@ -42,8 +41,11 @@
     publicToggle.addEventListener('click', () => telemetry && updateTelemetry('publicOptedOut', !telemetry.publicOptedOut));
     privateToggle.addEventListener('click', () => telemetry && updateTelemetry('privateOptedIn', !telemetry.privateOptedIn));
     async function loadLiveData() {
-      if (!token) return;
-      const response = await fetch('/api/dashboard/summary?limit=25', { headers: { Authorization: `Bearer ${token}` } });
+      const response = await fetch('/api/dashboard/summary?limit=25');
+      if (response.status === 401) {
+        document.querySelector('.notice').textContent = 'Connect GitHub to view live dashboard data.';
+        return;
+      }
       if (!response.ok) return;
       const data = await response.json();
       const stats = document.querySelectorAll('.stat-value');

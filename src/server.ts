@@ -440,8 +440,9 @@ app.put("/api/telemetry/settings", async (req: Request, res: Response) => {
 });
 
 app.get("/api/dashboard/summary", async (req: Request, res: Response) => {
-  const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
-  if (!process.env.WARDEN_API_TOKEN || token !== process.env.WARDEN_API_TOKEN) return res.status(401).json({ ok: false, error: "Unauthorized" });
+  const sessionId = cookieValue(req, SESSION_COOKIE);
+  const sessionToken = sessionId ? await getRedisClient().get<string>(`warden:oauth:session:${sessionId}`) : null;
+  if (!sessionToken) return res.status(401).json({ ok: false, error: "GitHub login required" });
   if (!db) return res.status(503).json({ ok: false, error: "Database unavailable" });
   const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 100);
   try {
