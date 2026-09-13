@@ -10,6 +10,8 @@ import { db } from "./db";
 import { repositories, scanRuns, findings, auditEvents, installations, remediations } from "./db/schema";
 import { handlePullRequestWebhook } from "./github/webhookHandler";
 import { getRedisClient } from "./lib/redis";
+import { getGumroadApiToken, verifyGumroadSale } from "./billing/gumroadConnect";
+import { getProRecord } from "./billing/store";
 import { schedulePopularPackageRefresh } from "./scan/popularPackageRefresh";
 import { setInstallationCorpusOptOut, setPrivateCorpusOptIn } from "./telemetry/corpusLog";
 import { authorizeInstallationRepositoryWrite, authorizeRunAccess, isUuid, sessionTokenFromRequest } from "./auth/runAccess";
@@ -339,6 +341,24 @@ app.get("/auth/github/callback", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("GitHub OAuth callback failed:", error);
     return res.status(502).send("GitHub OAuth is unavailable");
+  }
+});
+
+app.get("/api/billing/status", async (req: Request, res: Response) => {
+  const installationId = Number(req.query.installationId);
+  if (!Number.isSafeInteger(installationId) || installationId <= 0) return res.status(400).json({ ok: false, error: "Invalid installation ID" });
+  try {
+    const authorized = await dashboardInstallation(req, installationId);
+    if (authorized === null) return res.status(401).json({ ok: false, error: "GitHub login required" });
+    if (!authorized) return res.status(403).json({ ok: false, error: "Installation is not authorized for this GitHub account" });
+    if (!db) return res.status(503).json({ ok: false, error: "Database unavailable" });
+    const installation = (await db.select({ accountLogin: installations.accountLogin, plan: installations.plan }).from(installations).where(eq(installations.githubInstallationId, installationId)).limit(1))[0];
+    if (!installation) return res.status(404).json({ ok: false, error: "Installation not found" });
+    const record = await getProRecord(installation.accountLogin);
+    return res.json({ ok: true, plan: record?.status === "active" || record?.status === "trialing" ? record.plan : installation.plan, status: record?.status || "free", updatedAt: record?.updatedAt || null });
+  } catch (error) {
+    console.error("Billing status read failed:", error);
+    return res.status(502).json({ ok: false, error: "Could not load billing status" });
   }
 });
 
