@@ -10,7 +10,13 @@ Create an Upstash Redis database and configure `UPSTASH_REDIS_REST_URL` and `UPS
 
 ## 3. Gumroad products
 
-Create one recurring Gumroad product for each tier: Pro, Team, and Enterprise. Copy each product URL into `GUMROAD_CHECKOUT_PRO`, `GUMROAD_CHECKOUT_TEAM`, and `GUMROAD_CHECKOUT_ENTERPRISE`, and copy each product ID into the matching `GUMROAD_PRODUCT_*` variable. The product IDs are used server-side to determine the plan; client query parameters are never trusted for access.
+Launch one recurring product first:
+
+- **Warden CI Pro — $19/month**: private-repository scanning, unlimited public-repository scans, dependency risk detection, secrets and dangerous-execution findings, security reports, and verified remediation workflow.
+
+Keep Team and Enterprise hidden until the Pro onboarding and support process is proven. Copy the Pro product URL into `GUMROAD_CHECKOUT_PRO` and its product ID into `GUMROAD_PRODUCT_PRO`. Product IDs are used server-side to determine the plan; client query parameters are never trusted for access.
+
+The product description should state that private-repository scanning is a paid feature and that the GitHub Actions check is named **Warden security gate**. Do not advertise the retired **Warden CI** check.
 
 ## 4. Gumroad webhook
 
