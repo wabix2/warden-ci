@@ -28,7 +28,21 @@ const PORT = Number(process.env.PORT || 3000);
 const OAUTH_STATE_COOKIE = "warden_oauth_state";
 const SESSION_COOKIE = "warden_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 8;
-const CANONICAL_BASE_URL = process.env.PUBLIC_BASE_URL?.trim().replace(/\/$/, "") || "";
+const DEFAULT_PUBLIC_ORIGIN = "https://warden-ci-dvk5.onrender.com";
+const CONFIGURED_PUBLIC_ORIGIN = (process.env.WARDEN_PUBLIC_URL || process.env.PUBLIC_BASE_URL || "").trim().replace(/\/$/, "");
+
+function trustedPublicOrigin(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return DEFAULT_PUBLIC_ORIGIN;
+    if (url.hostname !== "warden-ci-dvk5.onrender.com") return DEFAULT_PUBLIC_ORIGIN;
+    return url.origin;
+  } catch {
+    return DEFAULT_PUBLIC_ORIGIN;
+  }
+}
+
+const CANONICAL_BASE_URL = trustedPublicOrigin(CONFIGURED_PUBLIC_ORIGIN || DEFAULT_PUBLIC_ORIGIN);
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_BODY_BYTES = 1_000_000;
 const MAX_REQUESTS_PER_WINDOW = 120;
@@ -129,6 +143,16 @@ function jsString(value: string): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
+function trustedGumroadCheckout(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || !/(^|\\.)gumroad\\.com$/i.test(url.hostname)) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
 const plans = {
   pro: {
     name: "Pro",
@@ -141,7 +165,7 @@ const plans = {
       "Line-level GitHub results",
       "Automated remediation",
     ],
-    checkoutUrl: () => process.env.GUMROAD_CHECKOUT_PRO || "",
+    checkoutUrl: () => trustedGumroadCheckout(process.env.GUMROAD_CHECKOUT_PRO || ""),
     productId: () => process.env.GUMROAD_PRODUCT_PRO || "",
   },
   team: {
@@ -441,8 +465,7 @@ app.get("/dashboard", (_req: Request, res: Response) => {
 });
 
 app.get("/upgrade", (_req: Request, res: Response) => {
-  const checkout = process.env.GUMROAD_CHECKOUT_PRO || "https://gumroad.com/l/warden-ci-pro";
-  res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Upgrade to Warden CI Pro</title><style>body{font-family:system-ui,sans-serif;background:#090d12;color:#e5e7eb;margin:0;padding:32px}main{max-width:760px;margin:auto}a{display:inline-block;background:#f59e0b;color:#111827;padding:12px 16px;border-radius:8px;text-decoration:none;font-weight:700}.card{border:1px solid #263241;border-radius:12px;padding:24px;background:#111821}.muted{color:#94a3b8}</style></head><body><main><p class="muted">Warden security gate</p><div class="card"><h1>Upgrade to Pro</h1><p>Enable private-repository scanning, complete security reports, and verified remediation workflows for your GitHub repositories.</p><p><strong>$19/month</strong></p><a href="${checkout}">Upgrade to Warden CI Pro</a></div></main></body></html>`);
+  res.redirect(302, "/subscribe?plan=pro");
 });
 
 app.get("/auth/github", async (_req: Request, res: Response) => {
