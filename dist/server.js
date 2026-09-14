@@ -23,6 +23,8 @@ const appAuth_1 = require("./github/appAuth");
 const engine_1 = require("./remediation/engine");
 const github_1 = require("./remediation/github");
 const osv_1 = require("./remediation/osv");
+const gmail_1 = require("./outreach/gmail");
+const audience_1 = require("./outreach/audience");
 const connect_1 = require("./automation/connect");
 const app = (0, express_1.default)();
 const PORT = Number(process.env.PORT || 3000);
@@ -75,18 +77,23 @@ async function githubJson(url, token) {
         throw new Error(`GitHub OAuth request failed (${response.status})`);
     return await response.json();
 }
-async function dashboardInstallation(req, installationId) {
+async function getOAuthSession(req) {
     const sessionId = cookieValue(req, SESSION_COOKIE);
     if (!sessionId)
         return null;
-    const token = await (0, redis_1.getRedisClient)().get(`warden:oauth:session:${sessionId}`);
-    if (!token)
+    const session = await (0, redis_1.getRedisClient)().get(`warden:oauth:session:${sessionId}`);
+    if (!session || typeof session !== "object" || !session.accessToken || !session.login || session.expiresAt <= Date.now())
         return null;
-    // The settings mutate installation-wide telemetry behavior. GitHub's OAuth
-    // repository listing proves repository read access, not installation-wide
-    // administrative authority, so do not grant broader access on that basis.
-    // This remains fail-closed until a documented stronger proof is available.
-    return false;
+    return session;
+}
+async function dashboardInstallation(req, installationId) {
+    const session = await getOAuthSession(req);
+    if (!session)
+        return null;
+    if (!db_1.db)
+        return false;
+    const installation = (await db_1.db.select({ accountLogin: schema_1.installations.accountLogin }).from(schema_1.installations).where((0, drizzle_orm_1.eq)(schema_1.installations.githubInstallationId, installationId)).limit(1))[0];
+    return Boolean(installation && installation.accountLogin.toLowerCase() === session.login.toLowerCase());
 }
 // Fail loud at boot, not silently on the first user's request — if this prints on
 // deploy, the waitlist (and Pro-status checks) will fail until it's fixed.
@@ -414,11 +421,12 @@ app.post("/api/runs/:runId/findings/:findingId/fix", async (req, res) => {
         if (!row)
             return res.status(404).json({ ok: false, error: "Finding not found" });
         const finding = row.finding;
-        if (!finding.packageName || !finding.ecosystem || !finding.currentVersion || !finding.manifestPath)
-            return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "Finding metadata is insufficient for safe remediation" });
+        if (!finding.packageName || !finding.ecosystem || !finding.currentVersion || !finding.manifestPath) {
+            return res.status(202).json({ ok: true, status: "fix_proposed", verificationStatus: "human_review_required", error: "This finding requires a reviewed remediation proposal" });
+        }
         const ecosystem = finding.ecosystem === "pypi" ? "python" : finding.ecosystem === "npm" ? "npm" : null;
         if (!ecosystem)
-            return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "Unsupported remediation ecosystem" });
+            return res.status(202).json({ ok: true, status: "fix_proposed", verificationStatus: "human_review_required", error: "This finding requires a reviewed remediation proposal" });
         const userToken = await (0, runAccess_1.sessionTokenFromRequest)(req);
         if (!userToken)
             return res.status(401).json({ ok: false, error: "GitHub login required" });
@@ -443,19 +451,27 @@ app.post("/api/runs/:runId/findings/:findingId/fix", async (req, res) => {
         const result = (0, engine_1.applyDependencyRemediation)({ ecosystem, packageName: finding.packageName, vulnerableRange: advisory.affectedRange, targetVersion: advisory.fixedVersion, manifestPath: finding.manifestPath, manifestContent: before });
         if (!(0, engine_1.manifestDiffIsScoped)(before, result.manifestContent, finding.packageName))
             return res.status(409).json({ ok: false, status: "verification_failed", error: "Remediation changed more than the intended dependency" });
-        const remediation = await db_1.db.insert(schema_1.remediations).values({ findingId, installationId: row.repository.installationId, repositoryId: row.repository.id, packageName: finding.packageName, targetVersion: advisory.fixedVersion, status: "creating" }).onConflictDoNothing().returning({ id: schema_1.remediations.id });
+        const remediation = await db_1.db.insert(schema_1.remediations).values({ findingId, installationId: row.repository.installationId, repositoryId: row.repository.id, packageName: finding.packageName, targetVersion: advisory.fixedVersion, status: "validation_passed", verificationStatus: "pending_rescan" }).onConflictDoNothing().returning({ id: schema_1.remediations.id });
         const created = remediation[0];
+        if (!created)
+            return res.status(200).json({ ok: true, status: "fix_proposed", verificationStatus: "pending_rescan", error: "An identical remediation is already in progress" });
         const pr = await (0, github_1.createRemediationPullRequest)(octokit, { owner, repo, baseBranch: row.repository.defaultBranch, baseSha: base.data.commit.sha, runId, findingId, reportUrl: `${process.env.PUBLIC_BASE_URL || ""}/details?runId=${runId}`, advisoryId: advisory.id, result });
-        const verification = await (0, osv_1.resolveOsvAdvisory)(ecosystem, finding.packageName, advisory.fixedVersion);
-        const verificationStatus = verification ? "verification_failed" : "verified_fixed";
-        const remediationStatus = verification ? "verification_failed" : "verified_fixed";
-        await db_1.db.update(schema_1.remediations).set({ status: remediationStatus, branchName: pr.branch, pullRequestNumber: pr.pullRequestNumber, pullRequestUrl: pr.pullRequestUrl, verificationStatus, updatedAt: new Date() }).where(created ? (0, drizzle_orm_1.eq)(schema_1.remediations.id, created.id) : (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.remediations.findingId, findingId), (0, drizzle_orm_1.eq)(schema_1.remediations.targetVersion, advisory.fixedVersion)));
-        return res.status(201).json({ ok: true, status: remediationStatus, pullRequestUrl: pr.pullRequestUrl, pullRequestNumber: pr.pullRequestNumber });
+        await db_1.db.update(schema_1.remediations).set({ status: "pr_created", branchName: pr.branch, pullRequestNumber: pr.pullRequestNumber, pullRequestUrl: pr.pullRequestUrl, verificationStatus: "pending_rescan", updatedAt: new Date() }).where((0, drizzle_orm_1.eq)(schema_1.remediations.id, created.id));
+        return res.status(201).json({ ok: true, status: "pr_created", verificationStatus: "pending_rescan", pullRequestUrl: pr.pullRequestUrl, pullRequestNumber: pr.pullRequestNumber });
     }
     catch (error) {
         console.error("Remediation request failed:", error);
         return res.status(502).json({ ok: false, error: "Could not evaluate remediation request" });
     }
+});
+app.get("/api/remediations/:remediationId", async (req, res) => {
+    const session = await getOAuthSession(req);
+    if (!session || !db_1.db || !(0, runAccess_1.isUuid)(String(req.params.remediationId || "")))
+        return res.status(404).json({ ok: false, error: "Remediation not found" });
+    const remediation = (await db_1.db.select({ remediation: schema_1.remediations, installationLogin: schema_1.installations.accountLogin }).from(schema_1.remediations).innerJoin(schema_1.installations, (0, drizzle_orm_1.eq)(schema_1.remediations.installationId, schema_1.installations.id)).where((0, drizzle_orm_1.eq)(schema_1.remediations.id, String(req.params.remediationId))).limit(1))[0];
+    if (!remediation || remediation.installationLogin.toLowerCase() !== session.login.toLowerCase())
+        return res.status(404).json({ ok: false, error: "Remediation not found" });
+    return res.json({ ok: true, remediation: remediation.remediation, canBeVerified: remediation.remediation.status === "pr_created" && remediation.remediation.verificationStatus === "pending_rescan" });
 });
 app.get("/details", (req, res) => {
     if (!req.query.runId)
@@ -464,6 +480,10 @@ app.get("/details", (req, res) => {
 });
 app.get("/dashboard", (_req, res) => {
     res.sendFile(path_1.default.join(__dirname, "..", "dashboard.html"));
+});
+app.get("/upgrade", (_req, res) => {
+    const checkout = process.env.GUMROAD_CHECKOUT_PRO || "https://gumroad.com/l/warden-ci-pro";
+    res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Upgrade to Warden CI Pro</title><style>body{font-family:system-ui,sans-serif;background:#090d12;color:#e5e7eb;margin:0;padding:32px}main{max-width:760px;margin:auto}a{display:inline-block;background:#f59e0b;color:#111827;padding:12px 16px;border-radius:8px;text-decoration:none;font-weight:700}.card{border:1px solid #263241;border-radius:12px;padding:24px;background:#111821}.muted{color:#94a3b8}</style></head><body><main><p class="muted">Warden security gate</p><div class="card"><h1>Upgrade to Pro</h1><p>Enable private-repository scanning, complete security reports, and verified remediation workflows for your GitHub repositories.</p><p><strong>$19/month</strong></p><a href="${checkout}">Upgrade to Warden CI Pro</a></div></main></body></html>`);
 });
 app.get("/auth/github", async (_req, res) => {
     const clientId = process.env.GITHUB_OAUTH_CLIENT_ID;
@@ -487,8 +507,12 @@ app.get("/auth/github/callback", async (req, res) => {
         const data = await response.json();
         if (!data.access_token)
             return res.status(401).send("GitHub OAuth failed");
+        const identity = await githubJson("https://api.github.com/user", data.access_token);
+        if (!identity.login)
+            return res.status(401).send("GitHub identity unavailable");
         const sessionId = (0, node_crypto_1.randomBytes)(32).toString("hex");
-        await (0, redis_1.getRedisClient)().set(`warden:oauth:session:${sessionId}`, data.access_token, { ex: SESSION_TTL_SECONDS });
+        const session = { accessToken: data.access_token, login: identity.login, expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000 };
+        await (0, redis_1.getRedisClient)().set(`warden:oauth:session:${sessionId}`, session, { ex: SESSION_TTL_SECONDS });
         res.setHeader("Set-Cookie", `${SESSION_COOKIE}=${sessionId}; HttpOnly; SameSite=Lax; Path=/${secureCookie(req)}`);
         return res.redirect("/dashboard");
     }
@@ -559,17 +583,66 @@ app.put("/api/telemetry/settings", async (req, res) => {
         return res.status(502).json({ ok: false, error: "Could not update telemetry settings" });
     }
 });
+app.post("/api/outreach/draft", async (req, res) => {
+    if (!await getOAuthSession(req))
+        return res.status(401).json({ ok: false, error: "GitHub login required" });
+    return res.json({ ok: true, draft: (0, audience_1.buildSafeDraft)(req.body || {}) });
+});
+app.post("/api/outreach/validate", async (req, res) => {
+    if (!await getOAuthSession(req))
+        return res.status(401).json({ ok: false, error: "GitHub login required" });
+    try {
+        const recipients = (0, audience_1.parseOptInAudience)(String(req.body?.csv || ""));
+        if (recipients.length === 0 || recipients.length > 50)
+            return res.status(400).json({ ok: false, error: "Upload between 1 and 50 opted-in recipients" });
+        return res.json({ ok: true, count: recipients.length, recipients: recipients.map(({ email, name, company }) => ({ email, name, company })) });
+    }
+    catch (error) {
+        return res.status(400).json({ ok: false, error: error instanceof Error ? error.message : "Invalid audience" });
+    }
+});
+app.post("/api/outreach/send", async (req, res) => {
+    const session = await getOAuthSession(req);
+    if (!session)
+        return res.status(401).json({ ok: false, error: "GitHub login required" });
+    const body = req.body;
+    if (!body.approved)
+        return res.status(409).json({ ok: false, error: "Human approval is required" });
+    if (!body.from || !body.recipients?.length || body.recipients.length > 50 || !body.subject || !body.html)
+        return res.status(400).json({ ok: false, error: "from, recipients, subject, and html are required" });
+    if (body.recipients.some((recipient) => !recipient.consent || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(recipient.email)))
+        return res.status(400).json({ ok: false, error: "Every recipient must be valid and opted in" });
+    try {
+        const sent = [];
+        for (const recipient of body.recipients) {
+            await (0, gmail_1.sendGmailMessage)({ id: `github:${session.login}`, issuer: "github" }, { from: body.from, to: recipient.email, subject: body.subject, html: body.html });
+            sent.push(recipient.email);
+        }
+        return res.status(202).json({ ok: true, status: "accepted", sent });
+    }
+    catch (error) {
+        console.error(JSON.stringify({ event: "outreach_send_failed", requestId: res.locals.requestId, error: error instanceof Error ? error.message : "unknown" }));
+        return res.status(502).json({ ok: false, error: "Gmail authorization or delivery failed" });
+    }
+});
 app.get("/api/dashboard/summary", async (req, res) => {
-    const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
-    if (!process.env.WARDEN_API_TOKEN || token !== process.env.WARDEN_API_TOKEN)
-        return res.status(401).json({ ok: false, error: "Unauthorized" });
+    const session = await getOAuthSession(req);
+    if (!session)
+        return res.status(401).json({ ok: false, error: "GitHub login required" });
     if (!db_1.db)
         return res.status(503).json({ ok: false, error: "Database unavailable" });
     const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 100);
     try {
-        const runs = await db_1.db.select().from(schema_1.scanRuns).limit(limit);
-        const recentFindings = await db_1.db.select().from(schema_1.findings).limit(limit);
-        const audit = await db_1.db.select().from(schema_1.auditEvents).limit(limit);
+        const ownedInstallations = await db_1.db.select({ id: schema_1.installations.id }).from(schema_1.installations).where((0, drizzle_orm_1.eq)(schema_1.installations.accountLogin, session.login));
+        const installationIds = ownedInstallations.map((item) => item.id);
+        if (installationIds.length === 0)
+            return res.json({ ok: true, generatedAt: new Date().toISOString(), summary: { scans: 0, blocked: 0, findings: 0 }, runs: [], findings: [], audit: [] });
+        const ownedRepositories = await db_1.db.select({ id: schema_1.repositories.id }).from(schema_1.repositories).where((0, drizzle_orm_1.inArray)(schema_1.repositories.installationId, installationIds));
+        const repositoryIds = ownedRepositories.map((item) => item.id);
+        const runs = repositoryIds.length ? await db_1.db.select().from(schema_1.scanRuns).where((0, drizzle_orm_1.inArray)(schema_1.scanRuns.repositoryId, repositoryIds)).limit(limit) : [];
+        const runIds = runs.map((run) => run.id);
+        const recentFindings = runIds.length ? await db_1.db.select().from(schema_1.findings).where((0, drizzle_orm_1.inArray)(schema_1.findings.scanRunId, runIds)).limit(limit) : [];
+        const audit = await db_1.db.select().from(schema_1.auditEvents).where((0, drizzle_orm_1.inArray)(schema_1.auditEvents.installationId, installationIds)).limit(limit);
         return res.json({ ok: true, generatedAt: new Date().toISOString(), summary: { scans: runs.length, blocked: runs.filter((run) => run.verdict === "failure").length, findings: recentFindings.length }, runs, findings: recentFindings, audit });
     }
     catch (error) {
