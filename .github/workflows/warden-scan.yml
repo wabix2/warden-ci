@@ -29,7 +29,7 @@ jobs:
           {
             echo "## Warden security gate"
             echo ""
-            echo "[Open the customer-facing report](https://warden-ci-dvk5.onrender.com/details?runId=${{ github.run_id }})"
+            printf '%s\n' '<a href="https://warden-ci-dvk5.onrender.com/details?runId=${{ github.run_id }}">Open the customer-facing report</a>'
             echo ""
-            echo "Private-repository scanning and verified remediation require [Warden CI Pro](https://warden-ci-dvk5.onrender.com/subscribe?plan=pro)"
+            printf '%s\n' '<a href="https://warden-ci-dvk5.onrender.com/subscribe?plan=pro">Upgrade to Warden CI Pro</a>'
           } >> "$GITHUB_STEP_SUMMARY"
