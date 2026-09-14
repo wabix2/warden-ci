@@ -22,7 +22,7 @@ import { resolveOsvAdvisory } from "./remediation/osv";
 import { sendApprovedEmail, sendGmailCampaignEmail, getGmailToken, startGmailAuthorization } from "./automation/connect";
 import { sendGmailMessage } from "./outreach/gmail";
 import { buildSafeDraft, parseOptInAudience } from "./outreach/audience";
-
+import { sendApprovedEmail } from "./automation/connect";
 
 import { CANONICAL_BASE_URL } from "./lib/publicUrl";
 
@@ -366,7 +366,7 @@ app.post("/api/automation/campaigns/:campaignId/send", async (req: Request, res:
   const html = String(req.body?.html || "").trim();
   const authorized = req.body?.authorizationConfirmed === true;
   const subjectId = await gmailSubjectId(req);
-  const unsubscribeUrl = `${process.env.PUBLIC_BASE_URL || ""}/api/automation/unsubscribe?campaign=${encodeURIComponent(campaignId)}`;
+  const unsubscribeUrl = `${CANONICAL_BASE_URL}/api/automation/unsubscribe?campaign=${encodeURIComponent(campaignId)}`;
   const campaignHtml = html.replaceAll("{{UNSUBSCRIBE_URL}}", unsubscribeUrl);
   if (!campaignId || !recipients.length || recipients.length > 100 || !subject || !html || !authorized) return res.status(400).json({ ok: false, error: "Campaign requires a verified audience, content, authorization confirmation, and no more than 100 recipients" });
   if (!subjectId) return res.status(503).json({ ok: false, error: "Gmail sender is not configured. Set WARDEN_GMAIL_SUBJECT_ID to the authorized Warden operator identity." });
