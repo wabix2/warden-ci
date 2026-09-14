@@ -17,6 +17,7 @@
     "test:remediation": "pnpm build && node --test scripts/test-remediation-engine.mjs scripts/test-remediation-authorization.mjs scripts/test-osv-remediation.mjs scripts/test-remediation-github.mjs",
     "test:billing": "pnpm build && node --test scripts/test-billing-store.mjs",
     "test:outreach": "pnpm build && node --test scripts/test-outreach-audience.mjs",
+    "test:customer-links": "node --test scripts/test-customer-links.mjs",
     "smoke:render": "node scripts/smoke-render.mjs"
   },
   "dependencies": {
