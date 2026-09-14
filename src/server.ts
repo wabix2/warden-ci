@@ -28,7 +28,21 @@ const PORT = Number(process.env.PORT || 3000);
 const OAUTH_STATE_COOKIE = "warden_oauth_state";
 const SESSION_COOKIE = "warden_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 8;
-const CANONICAL_BASE_URL = process.env.PUBLIC_BASE_URL?.trim().replace(/\/$/, "") || "";
+const DEFAULT_PUBLIC_ORIGIN = "https://warden-ci-dvk5.onrender.com";
+const CONFIGURED_PUBLIC_ORIGIN = (process.env.WARDEN_PUBLIC_URL || process.env.PUBLIC_BASE_URL || "").trim().replace(/\/$/, "");
+
+function trustedPublicOrigin(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return DEFAULT_PUBLIC_ORIGIN;
+    if (url.hostname !== "warden-ci-dvk5.onrender.com") return DEFAULT_PUBLIC_ORIGIN;
+    return url.origin;
+  } catch {
+    return DEFAULT_PUBLIC_ORIGIN;
+  }
+}
+
+const CANONICAL_BASE_URL = trustedPublicOrigin(CONFIGURED_PUBLIC_ORIGIN || DEFAULT_PUBLIC_ORIGIN);
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_BODY_BYTES = 1_000_000;
 const MAX_REQUESTS_PER_WINDOW = 120;
@@ -129,6 +143,16 @@ function jsString(value: string): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
+function trustedGumroadCheckout(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || !/(^|\\.)gumroad\\.com$/i.test(url.hostname)) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
 const plans = {
   pro: {
     name: "Pro",
@@ -141,7 +165,7 @@ const plans = {
       "Line-level GitHub results",
       "Automated remediation",
     ],
-    checkoutUrl: () => process.env.GUMROAD_CHECKOUT_PRO || "",
+    checkoutUrl: () => trustedGumroadCheckout(process.env.GUMROAD_CHECKOUT_PRO || ""),
     productId: () => process.env.GUMROAD_PRODUCT_PRO || "",
   },
   team: {

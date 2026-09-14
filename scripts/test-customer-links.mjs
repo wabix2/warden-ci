@@ -8,7 +8,7 @@ const server = fs.readFileSync("src/server.ts", "utf8");
 const scan = fs.readFileSync("scripts/warden-scan.mjs", "utf8");
 
 test("customer links use Warden routes, not GitHub destinations", () => {
-  assert.match(workflow, /https:\/\/warden-ci-dvk5\.onrender\.com\/dashboard/);
+  assert.match(workflow, /https:\/\/warden-ci-dvk5\.onrender\.com\/details\?runId=/);
   assert.match(workflow, /https:\/\/warden-ci-dvk5\.onrender\.com\/subscribe\?plan=pro/);
   assert.doesNotMatch(workflow, /github\.com|WARDEN_PUBLIC_URL/);
   assert.match(report, /href="\/subscribe\?plan=pro"/);
