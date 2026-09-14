@@ -468,6 +468,13 @@ app.get("/upgrade", (_req: Request, res: Response) => {
   res.redirect(302, "/subscribe?plan=pro");
 });
 
+app.get("/subscribe", (req: Request, res: Response) => {
+  if (String(req.query.plan || "pro") !== "pro") return res.status(400).send("Unsupported plan");
+  const checkout = trustedGumroadCheckout(process.env.GUMROAD_CHECKOUT_PRO || "");
+  if (!checkout) return res.status(503).send("Warden CI Pro checkout is not configured yet.");
+  return res.redirect(302, checkout);
+});
+
 app.get("/auth/github", async (_req: Request, res: Response) => {
   const clientId = process.env.GITHUB_OAUTH_CLIENT_ID;
   if (!clientId) return res.status(503).send("GitHub OAuth is not configured");
