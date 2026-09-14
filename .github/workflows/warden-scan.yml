@@ -29,7 +29,7 @@ jobs:
           {
             echo "## Warden security gate"
             echo ""
-            printf '%s\n' '<a href="https://warden-ci-dvk5.onrender.com/details?runId=${{ github.run_id }}">Open the customer-facing report</a>'
+            echo "[Open the customer-facing dashboard](https://warden-ci-dvk5.onrender.com/dashboard)"
             echo ""
-            printf '%s\n' '<a href="https://warden-ci-dvk5.onrender.com/subscribe?plan=pro">Upgrade to Warden CI Pro</a>'
+            echo "[Upgrade to Warden CI Pro](https://warden-ci-dvk5.onrender.com/subscribe?plan=pro)"
           } >> "$GITHUB_STEP_SUMMARY"

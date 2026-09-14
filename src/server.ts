@@ -279,7 +279,20 @@ app.post(
     next();
   });
 
-  app.get("/health", (_req: Request, res: Response) => res.status(200).json({ ok: true, service: "warden", status: "live" }));
+  app.get("/health", (_req: Request, res: Response) => {
+    const rawFlag = process.env.GUMROAD_CHECKOUT_ENABLED;
+    return res.json({
+      ok: true,
+      service: "warden",
+      status: "live",
+      checkoutEnabled: rawFlag !== "false",
+      plans: {
+        pro: Boolean(process.env.GUMROAD_CHECKOUT_PRO && process.env.GUMROAD_PRODUCT_PRO),
+        team: Boolean(process.env.GUMROAD_CHECKOUT_TEAM && process.env.GUMROAD_PRODUCT_TEAM),
+        enterprise: Boolean(process.env.GUMROAD_CHECKOUT_ENTERPRISE && process.env.GUMROAD_PRODUCT_ENTERPRISE),
+      },
+    });
+  });
   app.get("/ready", (_req: Request, res: Response) => {
     const redisReady = Boolean(process.env.UPSTASH_REDIS_REST_URL?.trim() && process.env.UPSTASH_REDIS_REST_TOKEN?.trim());
     const githubReady = Boolean(process.env.GITHUB_APP_ID?.trim() && process.env.GITHUB_PRIVATE_KEY?.trim() && process.env.GITHUB_WEBHOOK_SECRET?.trim());
@@ -466,13 +479,6 @@ app.get("/dashboard", (_req: Request, res: Response) => {
 
 app.get("/upgrade", (_req: Request, res: Response) => {
   res.redirect(302, "/subscribe?plan=pro");
-});
-
-app.get("/subscribe", (req: Request, res: Response) => {
-  if (String(req.query.plan || "pro") !== "pro") return res.status(400).send("Unsupported plan");
-  const checkout = trustedGumroadCheckout(process.env.GUMROAD_CHECKOUT_PRO || "");
-  if (!checkout) return res.status(503).send("Warden CI Pro checkout is not configured yet.");
-  return res.redirect(302, checkout);
 });
 
 app.get("/auth/github", async (_req: Request, res: Response) => {
@@ -883,21 +889,6 @@ app.post("/api/scan", async (req: Request, res: Response) => {
   const timedOut = error instanceof Error && error.message.includes("timed out");
   return res.status(timedOut ? 504 : 500).json({ ok: false, error: timedOut ? "Scan timed out" : "Scan failed", degraded: timedOut });
   }
-});
-
-app.get("/health", (_req: Request, res: Response) => {
-  const rawFlag = process.env.GUMROAD_CHECKOUT_ENABLED;
-  res.json({
-    ok: true,
-    gumroadWebhookConfigured: Boolean(process.env.GUMROAD_WEBHOOK_SECRET),
-    checkoutEnabled: rawFlag !== "false",
-    rawCheckoutEnabledValue: rawFlag ?? null,
-    plans: {
-      pro: Boolean(process.env.GUMROAD_CHECKOUT_PRO && process.env.GUMROAD_PRODUCT_PRO),
-      team: Boolean(process.env.GUMROAD_CHECKOUT_TEAM && process.env.GUMROAD_PRODUCT_TEAM),
-      enterprise: Boolean(process.env.GUMROAD_CHECKOUT_ENTERPRISE && process.env.GUMROAD_PRODUCT_ENTERPRISE),
-    },
-  });
 });
 
 app.listen(PORT, () => {
