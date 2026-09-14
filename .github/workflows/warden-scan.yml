@@ -24,4 +24,25 @@ jobs:
         env:
           WARDEN_URL: ${{ secrets.WARDEN_URL }}
           WARDEN_API_TOKEN: ${{ secrets.WARDEN_API_TOKEN }}
-        run: node scripts/warden-scan.mjs warden.patch
+          WARDEN_REPOSITORY_ID: ${{ github.repository_id }}
+          WARDEN_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set +e
+          node scripts/warden-scan.mjs warden.patch
+          scan_exit_code=$?
+          set -e
+
+          {
+            echo "## Warden security gate"
+            echo ""
+            if [ -f warden-report-url.txt ]; then
+              report_url="$(cat warden-report-url.txt)"
+              echo "[Open the customer-facing report]($report_url)"
+            else
+              echo "_A per-run report wasn't available for this scan._"
+            fi
+            echo ""
+            echo "[Upgrade to Warden CI Pro](https://warden-ci-dvk5.onrender.com/subscribe?owner=${{ github.repository_owner }}&plan=pro)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit $scan_exit_code

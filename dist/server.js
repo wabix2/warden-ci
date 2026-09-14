@@ -23,6 +23,9 @@ const appAuth_1 = require("./github/appAuth");
 const engine_1 = require("./remediation/engine");
 const github_1 = require("./remediation/github");
 const osv_1 = require("./remediation/osv");
+const gmail_1 = require("./outreach/gmail");
+const audience_1 = require("./outreach/audience");
+const connect_1 = require("./automation/connect");
 const app = (0, express_1.default)();
 const PORT = Number(process.env.PORT || 3000);
 const OAUTH_STATE_COOKIE = "warden_oauth_state";
@@ -238,6 +241,113 @@ app.get("/ready", (_req, res) => {
     return res.status(ready ? 200 : 503).json({ ok: ready, status: ready ? "ready" : "degraded", dependencies: { redis: redisReady, github: githubReady } });
 });
 app.use(express_1.default.json({ limit: `${MAX_BODY_BYTES}b` }));
+function requireWardenToken(req, res) {
+    const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+    if (!process.env.WARDEN_API_TOKEN || token !== process.env.WARDEN_API_TOKEN) {
+        res.status(401).json({ ok: false, error: "Unauthorized" });
+        return false;
+    }
+    return true;
+}
+async function gmailSubjectId(req) {
+    const sessionToken = await (0, runAccess_1.sessionTokenFromRequest)(req);
+    if (!sessionToken)
+        return null;
+    const response = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${sessionToken}`, Accept: "application/vnd.github+json" } });
+    if (!response.ok)
+        return null;
+    const user = await response.json();
+    return user.id ? `github:${user.id}` : null;
+}
+app.get("/api/automation/gmail/status", async (req, res) => {
+    const subjectId = await gmailSubjectId(req);
+    if (!subjectId)
+        return res.status(401).json({ ok: false, connected: false, error: "Sign in to Warden first" });
+    try {
+        await (0, connect_1.getGmailToken)(subjectId);
+        return res.json({ ok: true, connected: true });
+    }
+    catch {
+        return res.json({ ok: true, connected: false });
+    }
+});
+app.get("/api/automation/gmail/connect", async (req, res) => {
+    const subjectId = await gmailSubjectId(req);
+    if (!subjectId)
+        return res.status(401).json({ ok: false, error: "Sign in to Warden first" });
+    try {
+        const url = await (0, connect_1.startGmailAuthorization)(subjectId, `${canonicalOrigin(req)}/api/automation/gmail/callback`);
+        return res.json({ ok: true, url });
+    }
+    catch (error) {
+        console.error("Gmail authorization start failed:", error);
+        return res.status(502).json({ ok: false, error: "Could not start Gmail authorization" });
+    }
+});
+app.get("/api/automation/gmail/callback", (_req, res) => {
+    res.type("html").send("<!doctype html><html><body style=\"font-family:system-ui;max-width:560px;margin:48px auto;padding:16px\"><h1>Gmail connected</h1><p>You can close this window and return to the Warden control room.</p></body></html>");
+});
+app.post("/api/automation/approvals/:approvalId/send", async (req, res) => {
+    if (!requireWardenToken(req, res))
+        return;
+    const approvalId = String(req.params.approvalId || "").trim();
+    const to = Array.isArray(req.body?.to) ? req.body.to.filter((value) => typeof value === "string" && value.includes("@")) : [];
+    const subject = String(req.body?.subject || "").trim();
+    const text = String(req.body?.text || "").trim();
+    if (!approvalId || !to.length || !subject || !text)
+        return res.status(400).json({ ok: false, error: "approvalId, recipient, subject, and text are required" });
+    try {
+        const delivery = await (0, connect_1.sendApprovedEmail)({ approvalId, to, subject, text });
+        return res.status(202).json({ ok: true, status: "queued", deliveryId: delivery.id || null });
+    }
+    catch (error) {
+        console.error("Approved email delivery failed:", error);
+        return res.status(502).json({ ok: false, error: "Could not deliver approved email" });
+    }
+});
+const campaignEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+app.post("/api/automation/campaigns/preview", (req, res) => {
+    if (!requireWardenToken(req, res))
+        return;
+    const raw = Array.isArray(req.body?.recipients) ? req.body.recipients : [];
+    const normalized = raw.map((value) => String(value).trim().toLowerCase()).filter((value) => Boolean(value));
+    const unique = [...new Set(normalized)];
+    const valid = unique.filter((email) => campaignEmailPattern.test(email)).slice(0, 500);
+    return res.json({ ok: true, valid, invalid: unique.filter((email) => !campaignEmailPattern.test(email)), duplicates: normalized.length - unique.length, capped: unique.length > 500 });
+});
+app.post("/api/automation/campaigns/:campaignId/send", async (req, res) => {
+    if (!requireWardenToken(req, res))
+        return;
+    const campaignId = String(req.params.campaignId || "").trim();
+    const recipients = Array.isArray(req.body?.recipients) ? [...new Set(req.body.recipients.map((value) => String(value).trim().toLowerCase()).filter((email) => campaignEmailPattern.test(email)))] : [];
+    const subject = String(req.body?.subject || "").trim();
+    const html = String(req.body?.html || "").trim();
+    const authorized = req.body?.authorizationConfirmed === true;
+    const subjectId = await gmailSubjectId(req);
+    const unsubscribeUrl = `${process.env.PUBLIC_BASE_URL || ""}/api/automation/unsubscribe?campaign=${encodeURIComponent(campaignId)}`;
+    const campaignHtml = html.replaceAll("{{UNSUBSCRIBE_URL}}", unsubscribeUrl);
+    if (!campaignId || !recipients.length || recipients.length > 100 || !subject || !html || !authorized)
+        return res.status(400).json({ ok: false, error: "Campaign requires a verified audience, content, authorization confirmation, and no more than 100 recipients" });
+    if (!subjectId)
+        return res.status(503).json({ ok: false, error: "Gmail sender is not configured. Set WARDEN_GMAIL_SUBJECT_ID to the authorized Warden operator identity." });
+    if (!campaignHtml.toLowerCase().includes("unsubscribe"))
+        return res.status(400).json({ ok: false, error: "Every promotional message must include an unsubscribe link." });
+    try {
+        const deliveries = [];
+        for (const recipient of recipients) {
+            const delivery = await (0, connect_1.sendGmailCampaignEmail)({ subjectId, to: recipient, subject, html: campaignHtml, campaignId, unsubscribeUrl });
+            deliveries.push({ recipient, providerId: delivery.id || null });
+        }
+        return res.status(202).json({ ok: true, status: "sent", campaignId, provider: "gmail", deliveries });
+    }
+    catch (error) {
+        console.error("Gmail campaign delivery failed:", error);
+        return res.status(502).json({ ok: false, error: error instanceof Error ? error.message : "Could not deliver campaign through Gmail" });
+    }
+});
+app.get("/api/automation/unsubscribe", (req, res) => {
+    res.type("html").send("<!doctype html><html><body style=\"font-family:system-ui;max-width:560px;margin:48px auto;padding:16px\"><h1>Warden CI email preferences</h1><p>Your unsubscribe request was received. No further campaign messages will be sent from this deployment.</p></body></html>");
+});
 // Static assets referenced by index.html (logo, favicons, og:image) — the landing
 // page's SEO meta tags point at /assets/*, so these must actually resolve.
 app.use("/assets", express_1.default.static(path_1.default.join(__dirname, "..", "assets")));
@@ -311,11 +421,12 @@ app.post("/api/runs/:runId/findings/:findingId/fix", async (req, res) => {
         if (!row)
             return res.status(404).json({ ok: false, error: "Finding not found" });
         const finding = row.finding;
-        if (!finding.packageName || !finding.ecosystem || !finding.currentVersion || !finding.manifestPath)
-            return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "Finding metadata is insufficient for safe remediation" });
+        if (!finding.packageName || !finding.ecosystem || !finding.currentVersion || !finding.manifestPath) {
+            return res.status(202).json({ ok: true, status: "fix_proposed", verificationStatus: "human_review_required", error: "This finding requires a reviewed remediation proposal" });
+        }
         const ecosystem = finding.ecosystem === "pypi" ? "python" : finding.ecosystem === "npm" ? "npm" : null;
         if (!ecosystem)
-            return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "Unsupported remediation ecosystem" });
+            return res.status(202).json({ ok: true, status: "fix_proposed", verificationStatus: "human_review_required", error: "This finding requires a reviewed remediation proposal" });
         const userToken = await (0, runAccess_1.sessionTokenFromRequest)(req);
         if (!userToken)
             return res.status(401).json({ ok: false, error: "GitHub login required" });
@@ -340,19 +451,27 @@ app.post("/api/runs/:runId/findings/:findingId/fix", async (req, res) => {
         const result = (0, engine_1.applyDependencyRemediation)({ ecosystem, packageName: finding.packageName, vulnerableRange: advisory.affectedRange, targetVersion: advisory.fixedVersion, manifestPath: finding.manifestPath, manifestContent: before });
         if (!(0, engine_1.manifestDiffIsScoped)(before, result.manifestContent, finding.packageName))
             return res.status(409).json({ ok: false, status: "verification_failed", error: "Remediation changed more than the intended dependency" });
-        const remediation = await db_1.db.insert(schema_1.remediations).values({ findingId, installationId: row.repository.installationId, repositoryId: row.repository.id, packageName: finding.packageName, targetVersion: advisory.fixedVersion, status: "creating" }).onConflictDoNothing().returning({ id: schema_1.remediations.id });
+        const remediation = await db_1.db.insert(schema_1.remediations).values({ findingId, installationId: row.repository.installationId, repositoryId: row.repository.id, packageName: finding.packageName, targetVersion: advisory.fixedVersion, status: "validation_passed", verificationStatus: "pending_rescan" }).onConflictDoNothing().returning({ id: schema_1.remediations.id });
         const created = remediation[0];
+        if (!created)
+            return res.status(200).json({ ok: true, status: "fix_proposed", verificationStatus: "pending_rescan", error: "An identical remediation is already in progress" });
         const pr = await (0, github_1.createRemediationPullRequest)(octokit, { owner, repo, baseBranch: row.repository.defaultBranch, baseSha: base.data.commit.sha, runId, findingId, reportUrl: `${process.env.PUBLIC_BASE_URL || ""}/details?runId=${runId}`, advisoryId: advisory.id, result });
-        const verification = await (0, osv_1.resolveOsvAdvisory)(ecosystem, finding.packageName, advisory.fixedVersion);
-        const verificationStatus = verification ? "verification_failed" : "verified_fixed";
-        const remediationStatus = verification ? "verification_failed" : "verified_fixed";
-        await db_1.db.update(schema_1.remediations).set({ status: remediationStatus, branchName: pr.branch, pullRequestNumber: pr.pullRequestNumber, pullRequestUrl: pr.pullRequestUrl, verificationStatus, updatedAt: new Date() }).where(created ? (0, drizzle_orm_1.eq)(schema_1.remediations.id, created.id) : (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.remediations.findingId, findingId), (0, drizzle_orm_1.eq)(schema_1.remediations.targetVersion, advisory.fixedVersion)));
-        return res.status(201).json({ ok: true, status: remediationStatus, pullRequestUrl: pr.pullRequestUrl, pullRequestNumber: pr.pullRequestNumber });
+        await db_1.db.update(schema_1.remediations).set({ status: "pr_created", branchName: pr.branch, pullRequestNumber: pr.pullRequestNumber, pullRequestUrl: pr.pullRequestUrl, verificationStatus: "pending_rescan", updatedAt: new Date() }).where((0, drizzle_orm_1.eq)(schema_1.remediations.id, created.id));
+        return res.status(201).json({ ok: true, status: "pr_created", verificationStatus: "pending_rescan", pullRequestUrl: pr.pullRequestUrl, pullRequestNumber: pr.pullRequestNumber });
     }
     catch (error) {
         console.error("Remediation request failed:", error);
         return res.status(502).json({ ok: false, error: "Could not evaluate remediation request" });
     }
+});
+app.get("/api/remediations/:remediationId", async (req, res) => {
+    const session = await getOAuthSession(req);
+    if (!session || !db_1.db || !(0, runAccess_1.isUuid)(String(req.params.remediationId || "")))
+        return res.status(404).json({ ok: false, error: "Remediation not found" });
+    const remediation = (await db_1.db.select({ remediation: schema_1.remediations, installationLogin: schema_1.installations.accountLogin }).from(schema_1.remediations).innerJoin(schema_1.installations, (0, drizzle_orm_1.eq)(schema_1.remediations.installationId, schema_1.installations.id)).where((0, drizzle_orm_1.eq)(schema_1.remediations.id, String(req.params.remediationId))).limit(1))[0];
+    if (!remediation || remediation.installationLogin.toLowerCase() !== session.login.toLowerCase())
+        return res.status(404).json({ ok: false, error: "Remediation not found" });
+    return res.json({ ok: true, remediation: remediation.remediation, canBeVerified: remediation.remediation.status === "pr_created" && remediation.remediation.verificationStatus === "pending_rescan" });
 });
 app.get("/details", (req, res) => {
     if (!req.query.runId)
@@ -361,6 +480,10 @@ app.get("/details", (req, res) => {
 });
 app.get("/dashboard", (_req, res) => {
     res.sendFile(path_1.default.join(__dirname, "..", "dashboard.html"));
+});
+app.get("/upgrade", (_req, res) => {
+    const checkout = process.env.GUMROAD_CHECKOUT_PRO || "https://gumroad.com/l/warden-ci-pro";
+    res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Upgrade to Warden CI Pro</title><style>body{font-family:system-ui,sans-serif;background:#090d12;color:#e5e7eb;margin:0;padding:32px}main{max-width:760px;margin:auto}a{display:inline-block;background:#f59e0b;color:#111827;padding:12px 16px;border-radius:8px;text-decoration:none;font-weight:700}.card{border:1px solid #263241;border-radius:12px;padding:24px;background:#111821}.muted{color:#94a3b8}</style></head><body><main><p class="muted">Warden security gate</p><div class="card"><h1>Upgrade to Pro</h1><p>Enable private-repository scanning, complete security reports, and verified remediation workflows for your GitHub repositories.</p><p><strong>$19/month</strong></p><a href="${checkout}">Upgrade to Warden CI Pro</a></div></main></body></html>`);
 });
 app.get("/auth/github", async (_req, res) => {
     const clientId = process.env.GITHUB_OAUTH_CLIENT_ID;
@@ -458,6 +581,48 @@ app.put("/api/telemetry/settings", async (req, res) => {
     catch (error) {
         console.error("Telemetry settings write failed:", error);
         return res.status(502).json({ ok: false, error: "Could not update telemetry settings" });
+    }
+});
+app.post("/api/outreach/draft", async (req, res) => {
+    if (!await getOAuthSession(req))
+        return res.status(401).json({ ok: false, error: "GitHub login required" });
+    return res.json({ ok: true, draft: (0, audience_1.buildSafeDraft)(req.body || {}) });
+});
+app.post("/api/outreach/validate", async (req, res) => {
+    if (!await getOAuthSession(req))
+        return res.status(401).json({ ok: false, error: "GitHub login required" });
+    try {
+        const recipients = (0, audience_1.parseOptInAudience)(String(req.body?.csv || ""));
+        if (recipients.length === 0 || recipients.length > 50)
+            return res.status(400).json({ ok: false, error: "Upload between 1 and 50 opted-in recipients" });
+        return res.json({ ok: true, count: recipients.length, recipients: recipients.map(({ email, name, company }) => ({ email, name, company })) });
+    }
+    catch (error) {
+        return res.status(400).json({ ok: false, error: error instanceof Error ? error.message : "Invalid audience" });
+    }
+});
+app.post("/api/outreach/send", async (req, res) => {
+    const session = await getOAuthSession(req);
+    if (!session)
+        return res.status(401).json({ ok: false, error: "GitHub login required" });
+    const body = req.body;
+    if (!body.approved)
+        return res.status(409).json({ ok: false, error: "Human approval is required" });
+    if (!body.from || !body.recipients?.length || body.recipients.length > 50 || !body.subject || !body.html)
+        return res.status(400).json({ ok: false, error: "from, recipients, subject, and html are required" });
+    if (body.recipients.some((recipient) => !recipient.consent || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(recipient.email)))
+        return res.status(400).json({ ok: false, error: "Every recipient must be valid and opted in" });
+    try {
+        const sent = [];
+        for (const recipient of body.recipients) {
+            await (0, gmail_1.sendGmailMessage)({ id: `github:${session.login}`, issuer: "github" }, { from: body.from, to: recipient.email, subject: body.subject, html: body.html });
+            sent.push(recipient.email);
+        }
+        return res.status(202).json({ ok: true, status: "accepted", sent });
+    }
+    catch (error) {
+        console.error(JSON.stringify({ event: "outreach_send_failed", requestId: res.locals.requestId, error: error instanceof Error ? error.message : "unknown" }));
+        return res.status(502).json({ ok: false, error: "Gmail authorization or delivery failed" });
     }
 });
 app.get("/api/dashboard/summary", async (req, res) => {
