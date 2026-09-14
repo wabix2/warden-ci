@@ -133,7 +133,7 @@ function jsString(value: string): string {
 function trustedGumroadCheckout(value: string): string {
   try {
     const url = new URL(value);
-    if (url.protocol !== "https:" || !/(^|\\.)gumroad\\.com$/i.test(url.hostname)) return "";
+    if (url.protocol !== "https:" || !/(^|\.)gumroad\.com$/i.test(url.hostname)) return "";
     return url.toString();
   } catch {
     return "";
