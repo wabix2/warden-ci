@@ -22,7 +22,6 @@ import { resolveOsvAdvisory } from "./remediation/osv";
 import { sendApprovedEmail, sendGmailCampaignEmail, getGmailToken, startGmailAuthorization } from "./automation/connect";
 import { sendGmailMessage } from "./outreach/gmail";
 import { buildSafeDraft, parseOptInAudience } from "./outreach/audience";
-import { sendApprovedEmail } from "./automation/connect";
 
 import { CANONICAL_BASE_URL } from "./lib/publicUrl";
 
