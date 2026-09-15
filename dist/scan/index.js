@@ -9,10 +9,12 @@ const diff_1 = require("./diff");
 const secrets_1 = require("./secrets");
 const dangerousExec_1 = require("./dangerousExec");
 const riskSignals_1 = require("./riskSignals");
+const advisories_1 = require("./advisories");
 const npm_1 = require("./ecosystems/npm");
 const pypi_1 = require("./ecosystems/pypi");
 const rust_1 = require("./ecosystems/rust");
 const ruby_1 = require("./ecosystems/ruby");
+const policy_1 = require("../enforcement/policy");
 const MAX_ANNOTATIONS = 50; // GitHub Check Run API accepts at most 50 annotations per request
 const ECOSYSTEMS = [npm_1.npmEcosystem, pypi_1.pypiEcosystem, rust_1.rustEcosystem, ruby_1.rubyEcosystem];
 function ecosystemForFile(filename) {
@@ -23,6 +25,31 @@ async function checkPackageRisk(ecosystem, linesByPackage) {
     const annotations = [];
     const flags = [];
     const packages = [...linesByPackage.keys()];
+    // Live threat-intel pass: cross-reference every dependency against OSV's
+    // malicious-package feed. A confirmed `MAL-` advisory supersedes the softer
+    // metadata heuristics below — it means the invented/typo'd name is not just
+    // suspicious, it is already weaponized.
+    const osvEcosystem = (0, advisories_1.osvEcosystemFor)(ecosystem.id);
+    const malwareByPackage = osvEcosystem
+        ? await (0, advisories_1.queryMalwareAdvisories)(packages, osvEcosystem)
+        : new Map();
+    for (const [pkg, advisory] of malwareByPackage) {
+        flags.push({ ecosystem: ecosystem.id, verdict: "known-malware", packageName: pkg });
+        const summary = advisory.summary ? ` ${advisory.summary}` : "";
+        const evidence = advisory.reference ? ` See ${advisory.reference} (${advisory.osvId}).` : ` Advisory ${advisory.osvId}.`;
+        for (const line of linesByPackage.get(pkg)) {
+            annotations.push({
+                line,
+                title: "Known malicious package",
+                severity: "failure",
+                message: `Package "${pkg}" has a confirmed malicious-package advisory on the ${ecosystem.label} registry.${summary} This is the realized form of a slopsquat/typosquat attack — an attacker registered this name and published malware under it.${evidence} Do not install or merge this dependency.`,
+                category: "dependency",
+                confidence: "high",
+                remediation: `Remove "${pkg}", audit any machine that already installed it for compromise, and rotate secrets exposed to it.`,
+                fingerprint: `dependency:${ecosystem.id}:${pkg}:malware:${advisory.osvId}`,
+            });
+        }
+    }
     const CONCURRENCY = 8;
     for (let i = 0; i < packages.length; i += CONCURRENCY) {
         const batch = packages.slice(i, i + CONCURRENCY);
@@ -30,6 +57,10 @@ async function checkPackageRisk(ecosystem, linesByPackage) {
         batch.forEach((pkg, idx) => {
             const verdict = results[idx];
             if (!verdict)
+                return;
+            // A confirmed malware advisory already spoke for this package; don't
+            // dilute a hard failure with a softer, redundant heuristic finding.
+            if (malwareByPackage.has(pkg))
                 return;
             flags.push({ ecosystem: ecosystem.id, verdict: verdict.verdict, packageName: pkg, impersonating: verdict.impersonating, latestVersion: verdict.latestVersion, latestPublisher: verdict.latestPublisher });
             const lines = linesByPackage.get(pkg);
@@ -87,7 +118,7 @@ async function checkPackageRisk(ecosystem, linesByPackage) {
     }
     return { annotations, flags };
 }
-async function scanFiles(files) {
+async function scanFiles(files, policy) {
     const startedAt = Date.now();
     const annotations = [];
     const packageFlags = [];
@@ -127,7 +158,8 @@ async function scanFiles(files) {
     if (annotations.length > MAX_ANNOTATIONS) {
         annotations.length = MAX_ANNOTATIONS;
     }
-    const hasBlockingFinding = annotations.some((annotation) => annotation.severity === "failure");
+    const policyDecision = (0, policy_1.evaluateGate)(annotations, policy);
     const incomplete = filesSkipped > 0;
-    return { annotations, packageFlags, filesScanned, filesSkipped, verdict: hasBlockingFinding ? "fail" : incomplete ? "incomplete" : "pass", durationMs: Date.now() - startedAt };
+    const verdict = policyDecision.shouldBlock ? "fail" : incomplete && (policy?.failOnIncomplete ?? false) ? "incomplete" : "pass";
+    return { annotations, packageFlags, filesScanned, filesSkipped, policyDecision, verdict, durationMs: Date.now() - startedAt };
 }
