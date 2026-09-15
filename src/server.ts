@@ -202,16 +202,28 @@ app.post(
       return res.status(401).send("Invalid signature");
     }
 
-  const saleId = String(req.body?.sale_id || req.body?.id || "").trim();
-  const subscriptionId = String(req.body?.subscription_id || "").trim();
-  const productId = String(req.body?.product_id || "").trim();
+    const saleId = String(req.body?.sale_id || req.body?.id || "").trim();
+    const subscriptionId = String(req.body?.subscription_id || "").trim();
+    const productId = String(req.body?.product_id || "").trim();
     const productMap = Object.fromEntries((Object.keys(plans) as PlanKey[]).map((key) => [plans[key].productId(), key]));
     const plan = productMap[productId] as PlanKey | undefined;
     if (plan && plan !== "pro") return res.status(400).send("This tier is not available yet");
     if (!saleId || !plan) return res.status(400).send("Unknown product or malformed sale");
 
+    // Primary path: a Custom Field named "githubOwner" configured on the product,
+    // auto-filled via ?githubOwner=<value> on the checkout link, arrives here as
+    // custom_fields.githubOwner (per Gumroad's Custom Fields mechanism).
+    //
+    // Fallback: a plain (non-custom-field) URL parameter of the same name arrives
+    // nested under url_params, flattened by form-encoding to "url_params[githubOwner]" —
+    // NOT as a top-level field. Checked here in case the custom field is ever
+    // removed or misconfigured, so a sale doesn't silently fail to grant access.
     const fields = typeof req.body?.custom_fields === "string" ? JSON.parse(req.body.custom_fields) : req.body?.custom_fields || {};
-    const owner = String(fields.githubOwner || req.body?.github_owner || "").trim().toLowerCase();
+    const owner = String(
+      fields.githubOwner ||
+      req.body?.["url_params[githubOwner]"] ||
+      ""
+    ).trim().toLowerCase();
     const existingOwner = await getOwnerForSale(saleId);
     const resolvedOwner = owner || existingOwner;
     if (!resolvedOwner) return res.status(200).send("Ignored: owner unavailable");
@@ -797,7 +809,7 @@ app.get("/subscribe", (req: Request, res: Response) => {
           }
           if (typeof gtag === 'function') gtag('event', 'begin_checkout', { plan });
           const url = new URL(checkoutUrl);
-          url.searchParams.set('github_owner', owner);
+          url.searchParams.set('githubOwner', owner);
           url.searchParams.set('plan', plan);
           window.location.assign(url.toString());
         });
