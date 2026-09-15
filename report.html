@@ -37,6 +37,19 @@
   .customer-links { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
   .customer-links a { display: inline-flex; padding: 9px 12px; border: 1px solid #2dd4bf; border-radius: 7px; color: #99f6e4; text-decoration: none; }
   .customer-links a:last-child { border-color: #f59e0b; color: #fcd34d; }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
+  .export-btn { padding: 8px 12px; background: #111821; color: #e5e7eb; border: 1px solid #2dd4bf; border-radius: 7px; cursor: pointer; font: inherit; font-size: 14px; }
+  .export-btn:hover { background: #12262c; }
+  .export-btn:disabled { opacity: .6; cursor: default; }
+  .summary { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+  .summary-chip { font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 999px; border: 1px solid #263241; background: #111821; color: #e5e7eb; text-transform: uppercase; letter-spacing: .04em; }
+  .summary-chip.total { border-color: #2dd4bf; color: #99f6e4; }
+  .summary-chip.failure, .summary-chip.critical, .summary-chip.high { color: #fca5a5; border-color: #7f1d1d; }
+  .summary-chip.warning, .summary-chip.medium { color: #fcd34d; border-color: #92400e; }
+  .summary-chip.low { color: #93c5fd; border-color: #1e3a5f; }
+  .filters { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; align-items: center; }
+  .filters label { display: flex; align-items: center; gap: 8px; color: #94a3b8; font-size: 13px; }
+  .filters select { background: #111821; color: #e5e7eb; border: 1px solid #263241; border-radius: 6px; padding: 6px 8px; font: inherit; }
 </style>
 </head>
 <body>
@@ -83,6 +96,55 @@ function findingCard(f) {
     <p class="muted">Status: ${escapeHtml(f.status)}</p>
     ${fixSection}
   </article>`;
+}
+
+let currentRun = null;
+
+// SARIF / CycloneDX exports are served by /api/runs/:runId?format=... for the
+// authorized run. Fetch as a blob so an auth error surfaces inline instead of
+// navigating away from the report.
+async function downloadExport(format, button) {
+  if (!currentRun) return;
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "Preparing…";
+  try {
+    const response = await fetch(`/api/runs/${encodeURIComponent(currentRun.id)}?format=${encodeURIComponent(format)}`, { credentials: "same-origin" });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `Export failed (${response.status})`);
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = `warden-run-${currentRun.id}.${format === "sarif" ? "sarif" : "cyclonedx"}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+// Client-side severity/category filtering over the already-fetched findings — no
+// extra endpoint needed.
+function renderFindings() {
+  const severity = document.getElementById("filter-severity").value;
+  const category = document.getElementById("filter-category").value;
+  const filtered = currentRun.findings.filter((f) =>
+    (severity === "all" || f.severity === severity) &&
+    (category === "all" || f.category === category)
+  );
+  const list = document.getElementById("findings-list");
+  list.innerHTML = filtered.length
+    ? filtered.map(findingCard).join("")
+    : "<p class='muted'>No findings match the current filters.</p>";
+  wireFixButtons(currentRun);
 }
 
 function wireFixButtons(run) {

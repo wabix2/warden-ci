@@ -13,6 +13,7 @@ const npm_1 = require("./ecosystems/npm");
 const pypi_1 = require("./ecosystems/pypi");
 const rust_1 = require("./ecosystems/rust");
 const ruby_1 = require("./ecosystems/ruby");
+const policy_1 = require("../enforcement/policy");
 const MAX_ANNOTATIONS = 50; // GitHub Check Run API accepts at most 50 annotations per request
 const ECOSYSTEMS = [npm_1.npmEcosystem, pypi_1.pypiEcosystem, rust_1.rustEcosystem, ruby_1.rubyEcosystem];
 function ecosystemForFile(filename) {
@@ -87,7 +88,7 @@ async function checkPackageRisk(ecosystem, linesByPackage) {
     }
     return { annotations, flags };
 }
-async function scanFiles(files) {
+async function scanFiles(files, policy) {
     const startedAt = Date.now();
     const annotations = [];
     const packageFlags = [];
@@ -127,7 +128,8 @@ async function scanFiles(files) {
     if (annotations.length > MAX_ANNOTATIONS) {
         annotations.length = MAX_ANNOTATIONS;
     }
-    const hasBlockingFinding = annotations.some((annotation) => annotation.severity === "failure");
+    const policyDecision = (0, policy_1.evaluateGate)(annotations, policy);
     const incomplete = filesSkipped > 0;
-    return { annotations, packageFlags, filesScanned, filesSkipped, verdict: hasBlockingFinding ? "fail" : incomplete ? "incomplete" : "pass", durationMs: Date.now() - startedAt };
+    const verdict = policyDecision.shouldBlock ? "fail" : incomplete && (policy?.failOnIncomplete ?? false) ? "incomplete" : "pass";
+    return { annotations, packageFlags, filesScanned, filesSkipped, policyDecision, verdict, durationMs: Date.now() - startedAt };
 }
