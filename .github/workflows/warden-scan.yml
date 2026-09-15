@@ -6,7 +6,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write
   security-events: write
 
 jobs:
@@ -17,19 +17,51 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
+
       - name: Collect changed files
         id: diff
         run: git diff --unified=0 "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" > warden.patch
+
       - name: Run Warden API gate
+        id: run-gate
         env:
           WARDEN_URL: ${{ secrets.WARDEN_URL }}
           WARDEN_API_TOKEN: ${{ secrets.WARDEN_API_TOKEN }}
+          WARDEN_REPOSITORY_ID: ${{ github.repository_id }}
+          WARDEN_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          set +e
           node scripts/warden-scan.mjs warden.patch
+          scan_exit_code=$?
+          set -e
+
           {
             echo "## Warden security gate"
             echo ""
-            echo "Open the customer-facing report: $WARDEN_URL/details?runId=${{ github.run_id }}"
+            if [ -f warden-report-url.txt ]; then
+              report_url="$(cat warden-report-url.txt)"
+              echo "Report: $report_url"
+            else
+              echo "_A per-run report wasn't available for this scan._"
+            fi
             echo ""
-            echo "Private-repository scanning and verified remediation require Warden CI Pro: $WARDEN_URL/upgrade"
+            echo "Upgrade to Warden CI Pro: https://warden-ci-dvk5.onrender.com/subscribe?owner=${{ github.repository_owner }}&plan=pro"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "scan_exit_code=$scan_exit_code" >> "$GITHUB_OUTPUT"
+
+      - name: Post links as PR comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          report_line=""
+          if [ -f warden-report-url.txt ]; then
+            report_line="[Open the customer-facing report]($(cat warden-report-url.txt))"
+          fi
+          body=$(printf '## Warden security gate\n\n%s\n\n[Upgrade to Warden CI Pro](https://warden-ci-dvk5.onrender.com/subscribe?owner=%s&plan=pro)\n' "$report_line" "${{ github.repository_owner }}")
+          gh pr comment "${{ github.event.pull_request.number }}" --body "$body" --repo "${{ github.repository }}"
+
+      - name: Fail if scan failed
+        if: steps.run-gate.outputs.scan_exit_code != '0'
+        run: exit 1

@@ -28,6 +28,7 @@ import { getRedisClient } from "../lib/redis";
 import { evaluateGate } from "../enforcement/policy";
 import { db } from "../db";
 import { installations, repositories, scanRuns, findings } from "../db/schema";
+import { CANONICAL_BASE_URL } from "../lib/publicUrl";
 
 const ACTIONABLE_ACTIONS = new Set(["opened", "synchronize", "reopened"]);
 
@@ -249,7 +250,7 @@ export async function handlePullRequestWebhook(req: Request, res: Response): Pro
       conclusion: gate.shouldBlock || incomplete ? "failure" : annotations.length > 0 ? "neutral" : "success",
       output: {
         title: annotations.length === 0 ? "No issues found" : `${annotations.length} finding(s)`,
-        summary: `${summaryFor(annotations, filesScanned, filesSkipped)}${scanRun ? `\n\n[View security report](${process.env.PUBLIC_BASE_URL || ""}/details?runId=${encodeURIComponent(scanRun.id)})` : ""}`,
+        summary: `${summaryFor(annotations, filesScanned, filesSkipped)}${scanRun ? `\n\n[View security report](${CANONICAL_BASE_URL}/details?runId=${encodeURIComponent(scanRun.id)})` : ""}`,
         annotations: annotations.map((a) => ({
           path: a.path,
           start_line: a.line,

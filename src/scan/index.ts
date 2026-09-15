@@ -8,6 +8,7 @@ import { pypiEcosystem } from "./ecosystems/pypi";
 import { Ecosystem } from "./ecosystems/types";
 import { rustEcosystem } from "./ecosystems/rust";
 import { rubyEcosystem } from "./ecosystems/ruby";
+import { evaluateGate, type EnforcementPolicy, type PolicyDecision } from "../enforcement/policy";
 
 export interface ScannedFile {
   filename: string;
@@ -48,6 +49,7 @@ export interface ScanResult {
   packageFlags: PackageFlag[];
   filesScanned: number;
   filesSkipped: number;
+  policyDecision: PolicyDecision;
 }
 
 const MAX_ANNOTATIONS = 50; // GitHub Check Run API accepts at most 50 annotations per request
@@ -131,7 +133,7 @@ async function checkPackageRisk(
   return { annotations, flags };
 }
 
-export async function scanFiles(files: ScannedFile[]): Promise<ScanResult> {
+export async function scanFiles(files: ScannedFile[], policy?: Partial<EnforcementPolicy>): Promise<ScanResult> {
   const startedAt = Date.now();
   const annotations: ScanAnnotation[] = [];
   const packageFlags: PackageFlag[] = [];
@@ -177,7 +179,8 @@ export async function scanFiles(files: ScannedFile[]): Promise<ScanResult> {
     annotations.length = MAX_ANNOTATIONS;
   }
 
-  const hasBlockingFinding = annotations.some((annotation) => annotation.severity === "failure");
+  const policyDecision = evaluateGate(annotations, policy);
   const incomplete = filesSkipped > 0;
-  return { annotations, packageFlags, filesScanned, filesSkipped, verdict: hasBlockingFinding ? "fail" : incomplete ? "incomplete" : "pass", durationMs: Date.now() - startedAt };
+  const verdict = policyDecision.shouldBlock ? "fail" : incomplete && (policy?.failOnIncomplete ?? false) ? "incomplete" : "pass";
+  return { annotations, packageFlags, filesScanned, filesSkipped, policyDecision, verdict, durationMs: Date.now() - startedAt };
 }

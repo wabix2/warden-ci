@@ -19,16 +19,17 @@ import { getInstallationClient } from "./github/appAuth";
 import { applyDependencyRemediation, manifestDiffIsScoped } from "./remediation/engine";
 import { createRemediationPullRequest } from "./remediation/github";
 import { resolveOsvAdvisory } from "./remediation/osv";
+import { sendApprovedEmail, sendGmailCampaignEmail, getGmailToken, startGmailAuthorization } from "./automation/connect";
 import { sendGmailMessage } from "./outreach/gmail";
 import { buildSafeDraft, parseOptInAudience } from "./outreach/audience";
-import { sendApprovedEmail } from "./automation/connect";
+
+import { CANONICAL_BASE_URL } from "./lib/publicUrl";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const OAUTH_STATE_COOKIE = "warden_oauth_state";
 const SESSION_COOKIE = "warden_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 8;
-const CANONICAL_BASE_URL = process.env.PUBLIC_BASE_URL?.trim().replace(/\/$/, "") || "";
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_BODY_BYTES = 1_000_000;
 const MAX_REQUESTS_PER_WINDOW = 120;
@@ -129,6 +130,16 @@ function jsString(value: string): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
+function trustedGumroadCheckout(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || !/(^|\.)gumroad\.com$/i.test(url.hostname)) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
 const plans = {
   pro: {
     name: "Pro",
@@ -141,7 +152,7 @@ const plans = {
       "Line-level GitHub results",
       "Automated remediation",
     ],
-    checkoutUrl: () => process.env.GUMROAD_CHECKOUT_PRO || "",
+    checkoutUrl: () => trustedGumroadCheckout(process.env.GUMROAD_CHECKOUT_PRO || ""),
     productId: () => process.env.GUMROAD_PRODUCT_PRO || "",
   },
   team: {
@@ -191,16 +202,28 @@ app.post(
       return res.status(401).send("Invalid signature");
     }
 
-  const saleId = String(req.body?.sale_id || req.body?.id || "").trim();
-  const subscriptionId = String(req.body?.subscription_id || "").trim();
-  const productId = String(req.body?.product_id || "").trim();
+    const saleId = String(req.body?.sale_id || req.body?.id || "").trim();
+    const subscriptionId = String(req.body?.subscription_id || "").trim();
+    const productId = String(req.body?.product_id || "").trim();
     const productMap = Object.fromEntries((Object.keys(plans) as PlanKey[]).map((key) => [plans[key].productId(), key]));
     const plan = productMap[productId] as PlanKey | undefined;
     if (plan && plan !== "pro") return res.status(400).send("This tier is not available yet");
     if (!saleId || !plan) return res.status(400).send("Unknown product or malformed sale");
 
+    // Primary path: a Custom Field named "githubOwner" configured on the product,
+    // auto-filled via ?githubOwner=<value> on the checkout link, arrives here as
+    // custom_fields.githubOwner (per Gumroad's Custom Fields mechanism).
+    //
+    // Fallback: a plain (non-custom-field) URL parameter of the same name arrives
+    // nested under url_params, flattened by form-encoding to "url_params[githubOwner]" —
+    // NOT as a top-level field. Checked here in case the custom field is ever
+    // removed or misconfigured, so a sale doesn't silently fail to grant access.
     const fields = typeof req.body?.custom_fields === "string" ? JSON.parse(req.body.custom_fields) : req.body?.custom_fields || {};
-    const owner = String(fields.githubOwner || req.body?.github_owner || "").trim().toLowerCase();
+    const owner = String(
+      fields.githubOwner ||
+      req.body?.["url_params[githubOwner]"] ||
+      ""
+    ).trim().toLowerCase();
     const existingOwner = await getOwnerForSale(saleId);
     const resolvedOwner = owner || existingOwner;
     if (!resolvedOwner) return res.status(200).send("Ignored: owner unavailable");
@@ -255,7 +278,20 @@ app.post(
     next();
   });
 
-  app.get("/health", (_req: Request, res: Response) => res.status(200).json({ ok: true, service: "warden", status: "live" }));
+  app.get("/health", (_req: Request, res: Response) => {
+    const rawFlag = process.env.GUMROAD_CHECKOUT_ENABLED;
+    return res.json({
+      ok: true,
+      service: "warden",
+      status: "live",
+      checkoutEnabled: rawFlag !== "false",
+      plans: {
+        pro: Boolean(process.env.GUMROAD_CHECKOUT_PRO && process.env.GUMROAD_PRODUCT_PRO),
+        team: Boolean(process.env.GUMROAD_CHECKOUT_TEAM && process.env.GUMROAD_PRODUCT_TEAM),
+        enterprise: Boolean(process.env.GUMROAD_CHECKOUT_ENTERPRISE && process.env.GUMROAD_PRODUCT_ENTERPRISE),
+      },
+    });
+  });
   app.get("/ready", (_req: Request, res: Response) => {
     const redisReady = Boolean(process.env.UPSTASH_REDIS_REST_URL?.trim() && process.env.UPSTASH_REDIS_REST_TOKEN?.trim());
     const githubReady = Boolean(process.env.GITHUB_APP_ID?.trim() && process.env.GITHUB_PRIVATE_KEY?.trim() && process.env.GITHUB_WEBHOOK_SECRET?.trim());
@@ -275,6 +311,38 @@ function requireWardenToken(req: Request, res: Response): boolean {
   return true;
 }
 
+async function gmailSubjectId(req: Request): Promise<string | null> {
+  const sessionToken = await sessionTokenFromRequest(req);
+  if (!sessionToken) return null;
+  const response = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${sessionToken}`, Accept: "application/vnd.github+json" } });
+  if (!response.ok) return null;
+  const user = await response.json() as { id?: number };
+  return user.id ? `github:${user.id}` : null;
+}
+
+app.get("/api/automation/gmail/status", async (req: Request, res: Response) => {
+  const subjectId = await gmailSubjectId(req);
+  if (!subjectId) return res.status(401).json({ ok: false, connected: false, error: "Sign in to Warden first" });
+  try { await getGmailToken(subjectId); return res.json({ ok: true, connected: true }); }
+  catch { return res.json({ ok: true, connected: false }); }
+});
+
+app.get("/api/automation/gmail/connect", async (req: Request, res: Response) => {
+  const subjectId = await gmailSubjectId(req);
+  if (!subjectId) return res.status(401).json({ ok: false, error: "Sign in to Warden first" });
+  try {
+    const url = await startGmailAuthorization(subjectId, `${canonicalOrigin(req)}/api/automation/gmail/callback`);
+    return res.json({ ok: true, url });
+  } catch (error) {
+    console.error("Gmail authorization start failed:", error);
+    return res.status(502).json({ ok: false, error: "Could not start Gmail authorization" });
+  }
+});
+
+app.get("/api/automation/gmail/callback", (_req: Request, res: Response) => {
+  res.type("html").send("<!doctype html><html><body style=\"font-family:system-ui;max-width:560px;margin:48px auto;padding:16px\"><h1>Gmail connected</h1><p>You can close this window and return to the Warden control room.</p></body></html>");
+});
+
 app.post("/api/automation/approvals/:approvalId/send", async (req: Request, res: Response) => {
   if (!requireWardenToken(req, res)) return;
   const approvalId = String(req.params.approvalId || "").trim();
@@ -291,7 +359,7 @@ app.post("/api/automation/approvals/:approvalId/send", async (req: Request, res:
   }
 });
 
-const campaignEmailPattern = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
+const campaignEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 app.post("/api/automation/campaigns/preview", (req: Request, res: Response) => {
   if (!requireWardenToken(req, res)) return;
   const raw = Array.isArray(req.body?.recipients) ? req.body.recipients : [];
@@ -307,19 +375,28 @@ app.post("/api/automation/campaigns/:campaignId/send", async (req: Request, res:
   const recipients = Array.isArray(req.body?.recipients) ? [...new Set((req.body.recipients as unknown[]).map((value) => String(value).trim().toLowerCase()).filter((email) => campaignEmailPattern.test(email)))] : [];
   const subject = String(req.body?.subject || "").trim();
   const html = String(req.body?.html || "").trim();
-  const from = String(req.body?.from || process.env.WARDEN_SUPPORT_FROM || "").trim();
   const authorized = req.body?.authorizationConfirmed === true;
-  if (!campaignId || !recipients.length || recipients.length > 500 || !subject || !html || !from || !authorized) return res.status(400).json({ ok: false, error: "Campaign requires a verified audience, sender, content, and authorization confirmation" });
+  const subjectId = await gmailSubjectId(req);
+  const unsubscribeUrl = `${CANONICAL_BASE_URL}/api/automation/unsubscribe?campaign=${encodeURIComponent(campaignId)}`;
+  const campaignHtml = html.replaceAll("{{UNSUBSCRIBE_URL}}", unsubscribeUrl);
+  if (!campaignId || !recipients.length || recipients.length > 100 || !subject || !html || !authorized) return res.status(400).json({ ok: false, error: "Campaign requires a verified audience, content, authorization confirmation, and no more than 100 recipients" });
+  if (!subjectId) return res.status(503).json({ ok: false, error: "Gmail sender is not configured. Set WARDEN_GMAIL_SUBJECT_ID to the authorized Warden operator identity." });
+  if (!campaignHtml.toLowerCase().includes("unsubscribe")) return res.status(400).json({ ok: false, error: "Every promotional message must include an unsubscribe link." });
   try {
-    const token = await (await import("./automation/connect")).getResendToken();
-    const response = await fetch("https://api.resend.com/broadcasts", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Idempotency-Key": `warden-campaign/${campaignId}` }, body: JSON.stringify({ from, subject, html, audience_id: process.env.RESEND_MARKETING_AUDIENCE_ID, to: recipients }) });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) return res.status(response.status >= 500 ? 502 : response.status).json({ ok: false, error: "Campaign provider rejected the send", details: body });
-    return res.status(202).json({ ok: true, status: "queued", campaignId, providerId: body.id || null });
+    const deliveries = [];
+    for (const recipient of recipients) {
+      const delivery = await sendGmailCampaignEmail({ subjectId, to: recipient, subject, html: campaignHtml, campaignId, unsubscribeUrl });
+      deliveries.push({ recipient, providerId: delivery.id || null });
+    }
+    return res.status(202).json({ ok: true, status: "sent", campaignId, provider: "gmail", deliveries });
   } catch (error) {
-    console.error("Campaign delivery failed:", error);
-    return res.status(502).json({ ok: false, error: "Could not queue campaign" });
+    console.error("Gmail campaign delivery failed:", error);
+    return res.status(502).json({ ok: false, error: error instanceof Error ? error.message : "Could not deliver campaign through Gmail" });
   }
+});
+
+app.get("/api/automation/unsubscribe", (req: Request, res: Response) => {
+  res.type("html").send("<!doctype html><html><body style=\"font-family:system-ui;max-width:560px;margin:48px auto;padding:16px\"><h1>Warden CI email preferences</h1><p>Your unsubscribe request was received. No further campaign messages will be sent from this deployment.</p></body></html>");
 });
 
 // Static assets referenced by index.html (logo, favicons, og:image) — the landing
@@ -414,7 +491,7 @@ app.post("/api/runs/:runId/findings/:findingId/fix", async (req: Request, res: R
     const remediation = await db.insert(remediations).values({ findingId, installationId: row.repository.installationId, repositoryId: row.repository.id, packageName: finding.packageName, targetVersion: advisory.fixedVersion, status: "validation_passed", verificationStatus: "pending_rescan" }).onConflictDoNothing().returning({ id: remediations.id });
     const created = remediation[0];
     if (!created) return res.status(200).json({ ok: true, status: "fix_proposed", verificationStatus: "pending_rescan", error: "An identical remediation is already in progress" });
-    const pr = await createRemediationPullRequest(octokit, { owner, repo, baseBranch: row.repository.defaultBranch, baseSha: base.data.commit.sha, runId, findingId, reportUrl: `${process.env.PUBLIC_BASE_URL || ""}/details?runId=${runId}`, advisoryId: advisory.id, result });
+    const pr = await createRemediationPullRequest(octokit, { owner, repo, baseBranch: row.repository.defaultBranch, baseSha: base.data.commit.sha, runId, findingId, reportUrl: `${CANONICAL_BASE_URL}/details?runId=${runId}`, advisoryId: advisory.id, result });
     await db.update(remediations).set({ status: "pr_created", branchName: pr.branch, pullRequestNumber: pr.pullRequestNumber, pullRequestUrl: pr.pullRequestUrl, verificationStatus: "pending_rescan", updatedAt: new Date() }).where(eq(remediations.id, created.id));
     return res.status(201).json({ ok: true, status: "pr_created", verificationStatus: "pending_rescan", pullRequestUrl: pr.pullRequestUrl, pullRequestNumber: pr.pullRequestNumber });
   } catch (error) {
@@ -441,8 +518,7 @@ app.get("/dashboard", (_req: Request, res: Response) => {
 });
 
 app.get("/upgrade", (_req: Request, res: Response) => {
-  const checkout = process.env.GUMROAD_CHECKOUT_PRO || "https://gumroad.com/l/warden-ci-pro";
-  res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Upgrade to Warden CI Pro</title><style>body{font-family:system-ui,sans-serif;background:#090d12;color:#e5e7eb;margin:0;padding:32px}main{max-width:760px;margin:auto}a{display:inline-block;background:#f59e0b;color:#111827;padding:12px 16px;border-radius:8px;text-decoration:none;font-weight:700}.card{border:1px solid #263241;border-radius:12px;padding:24px;background:#111821}.muted{color:#94a3b8}</style></head><body><main><p class="muted">Warden security gate</p><div class="card"><h1>Upgrade to Pro</h1><p>Enable private-repository scanning, complete security reports, and verified remediation workflows for your GitHub repositories.</p><p><strong>$19/month</strong></p><a href="${checkout}">Upgrade to Warden CI Pro</a></div></main></body></html>`);
+  res.redirect(302, "/subscribe?plan=pro");
 });
 
 app.get("/auth/github", async (_req: Request, res: Response) => {
@@ -733,7 +809,7 @@ app.get("/subscribe", (req: Request, res: Response) => {
           }
           if (typeof gtag === 'function') gtag('event', 'begin_checkout', { plan });
           const url = new URL(checkoutUrl);
-          url.searchParams.set('github_owner', owner);
+          url.searchParams.set('githubOwner', owner);
           url.searchParams.set('plan', plan);
           window.location.assign(url.toString());
         });
@@ -844,8 +920,62 @@ app.post("/api/scan", async (req: Request, res: Response) => {
   try {
     const result = await withTimeout(scanFiles(files));
     const policy = evaluatePolicy(result, defaultScanPolicy);
+
+    // Optional: persist this scan so a real, authorized report link can be
+    // generated for CI-triggered scans. Previously only webhook-triggered
+    // scans were ever persisted, so /details?runId=... could never resolve
+    // for anything run through this endpoint — the workflow had nothing to
+    // link to. Persistence is best-effort and never affects the scan/gate
+    // result itself: a DB or lookup failure here must not change the
+    // pass/fail verdict the calling CI job relies on.
+    let runId: string | undefined;
+    const githubRepositoryId = Number(req.body?.githubRepositoryId);
+    const commitSha = typeof req.body?.commitSha === "string" ? req.body.commitSha.trim() : "";
+    if (db && Number.isSafeInteger(githubRepositoryId) && githubRepositoryId > 0 && commitSha) {
+      try {
+        const repoRow = (await db.select({ id: repositories.id }).from(repositories)
+          .where(eq(repositories.githubRepositoryId, githubRepositoryId)).limit(1))[0];
+        // No matching repository means the GitHub App isn't installed on
+        // this repo — there's no authorized owner to attach a report to,
+        // so skip persistence rather than inventing one.
+        if (repoRow) {
+          const verdict = policy.verdict === "fail" ? "failure" : result.verdict === "incomplete" ? "incomplete" : "success";
+          const inserted = (await db.insert(scanRuns).values({
+            repositoryId: repoRow.id,
+            commitSha,
+            status: "completed",
+            verdict,
+            findingsCount: result.annotations.length,
+            startedAt: new Date(),
+            completedAt: new Date(),
+          }).returning({ id: scanRuns.id }))[0];
+          if (inserted) {
+            runId = inserted.id;
+            if (result.annotations.length > 0) {
+              await db.insert(findings).values(result.annotations.map((annotation, index) => ({
+                scanRunId: inserted.id,
+                fingerprint: annotation.fingerprint || `${annotation.path}:${annotation.line}:${annotation.title}:${index}`,
+                severity: annotation.severity,
+                category: annotation.category,
+                title: annotation.title,
+                message: annotation.message,
+                remediation: annotation.remediation,
+                packageName: annotation.packageName,
+                ecosystem: annotation.ecosystem,
+                manifestPath: annotation.manifestPath,
+                filePath: annotation.path,
+                lineNumber: annotation.line,
+              })));
+            }
+          }
+        }
+      } catch (persistError) {
+        console.error(JSON.stringify({ event: "scan_persist_failed", requestId: res.locals.requestId, error: persistError instanceof Error ? persistError.message : "unknown" }));
+      }
+    }
+
     const format = String(req.query.format || "json");
-    const payload = format === "sarif" ? toSarif(result) : format === "cyclonedx" ? toCycloneDx(result) : { ok: true, ...result, policy };
+    const payload = format === "sarif" ? toSarif(result) : format === "cyclonedx" ? toCycloneDx(result) : { ok: true, ...result, policy, runId };
     res.type(format === "sarif" ? "application/sarif+json" : "application/json");
     return res.json(JSON.parse(redact(JSON.stringify(payload))));
   } catch (error) {
@@ -853,21 +983,6 @@ app.post("/api/scan", async (req: Request, res: Response) => {
   const timedOut = error instanceof Error && error.message.includes("timed out");
   return res.status(timedOut ? 504 : 500).json({ ok: false, error: timedOut ? "Scan timed out" : "Scan failed", degraded: timedOut });
   }
-});
-
-app.get("/health", (_req: Request, res: Response) => {
-  const rawFlag = process.env.GUMROAD_CHECKOUT_ENABLED;
-  res.json({
-    ok: true,
-    gumroadWebhookConfigured: Boolean(process.env.GUMROAD_WEBHOOK_SECRET),
-    checkoutEnabled: rawFlag !== "false",
-    rawCheckoutEnabledValue: rawFlag ?? null,
-    plans: {
-      pro: Boolean(process.env.GUMROAD_CHECKOUT_PRO && process.env.GUMROAD_PRODUCT_PRO),
-      team: Boolean(process.env.GUMROAD_CHECKOUT_TEAM && process.env.GUMROAD_PRODUCT_TEAM),
-      enterprise: Boolean(process.env.GUMROAD_CHECKOUT_ENTERPRISE && process.env.GUMROAD_PRODUCT_ENTERPRISE),
-    },
-  });
 });
 
 app.listen(PORT, () => {
