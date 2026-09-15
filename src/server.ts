@@ -220,8 +220,8 @@ app.post(
     // removed or misconfigured, so a sale doesn't silently fail to grant access.
     const fields = typeof req.body?.custom_fields === "string" ? JSON.parse(req.body.custom_fields) : req.body?.custom_fields || {};
     const owner = String(
-      fields.githubOwner ||
       req.body?.["url_params[githubOwner]"] ||
+      fields.githubOwner ||
       ""
     ).trim().toLowerCase();
     const existingOwner = await getOwnerForSale(saleId);
