@@ -7,6 +7,7 @@ import { setProStatus, getOwnerForSale, addToWaitlist, getWaitlist } from "./bil
 import { scanFiles, ScannedFile, type ScanAnnotation } from "./scan";
 import { defaultScanPolicy, evaluatePolicy, toCycloneDx, toSarif, redact } from "./scan/enterprise";
 import { assessPackage } from "./scan/riskSignals";
+import { queryMalwareAdvisories, osvEcosystemFor } from "./scan/advisories";
 import { npmEcosystem } from "./scan/ecosystems/npm";
 import { pypiEcosystem } from "./scan/ecosystems/pypi";
 import type { Ecosystem } from "./scan/ecosystems/types";
@@ -676,7 +677,23 @@ app.get("/api/check/package", async (req: Request, res: Response) => {
   if (!ecosystem) return res.status(400).json({ ok: false, error: "ecosystem must be one of: npm, pypi" });
   if (!name || name.length > 214 || !/^[@a-z0-9._/-]+$/i.test(name)) return res.status(400).json({ ok: false, error: "A valid package name is required" });
   try {
-    const verdict = await withTimeout(assessPackage(name, ecosystem), 8_000);
+    // Threat-intel first: a confirmed malicious-package advisory is the strongest
+    // possible signal and supersedes any softer metadata heuristic. This lets the
+    // IDE extension flag realized slopsquat malware at suggestion-accept time.
+    const osvEcosystem = osvEcosystemFor(ecosystem.id);
+    const [verdict, malware] = await Promise.all([
+      withTimeout(assessPackage(name, ecosystem), 8_000),
+      osvEcosystem ? withTimeout(queryMalwareAdvisories([name], osvEcosystem), 8_000).catch(() => new Map()) : Promise.resolve(new Map()),
+    ]);
+    const advisory = malware.get(name);
+    if (advisory) {
+      return res.json({
+        ok: true, ecosystem: ecosystem.id, name, flagged: true, verdict: "known-malware", severity: "error",
+        osvId: advisory.osvId, reference: advisory.reference,
+        message: `Package "${name}" has a confirmed malicious-package advisory on the ${ecosystem.label} registry.${advisory.summary ? ` ${advisory.summary}` : ""} An attacker registered this name and published malware under it — do not install it.`,
+        remediation: `Remove "${name}", audit any machine that already installed it, and rotate exposed secrets. Advisory: ${advisory.reference ?? advisory.osvId}.`,
+      });
+    }
     if (!verdict) return res.json({ ok: true, ecosystem: ecosystem.id, name, flagged: false });
     const described = describePackageVerdict(ecosystem.label, verdict);
     return res.json({ ok: true, ecosystem: ecosystem.id, name, flagged: true, verdict: verdict.verdict, impersonating: verdict.impersonating, publishedDaysAgo: verdict.publishedDaysAgo, ...described });

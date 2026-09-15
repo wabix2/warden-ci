@@ -51,7 +51,7 @@ async function setPrivateCorpusOptIn(installationId, enabled) {
 }
 const SAFE_PACKAGE_NAME = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+$/i;
 const ALLOWED_ECOSYSTEMS = new Set(["npm", "pypi", "rust", "ruby"]);
-const ALLOWED_VERDICTS = new Set(["hallucinated", "typosquat-suspect", "dependency-confusion-suspect", "maintainer-takeover-suspect"]);
+const ALLOWED_VERDICTS = new Set(["hallucinated", "typosquat-suspect", "dependency-confusion-suspect", "maintainer-takeover-suspect", "known-malware"]);
 function sanitizeCorpusInput(input) {
     if (!ALLOWED_ECOSYSTEMS.has(input.ecosystem) || !SAFE_PACKAGE_NAME.test(input.packageName) || input.packageName.length > 214 || !ALLOWED_VERDICTS.has(input.verdict)) {
         throw new Error("Invalid corpus telemetry package event");

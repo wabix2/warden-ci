@@ -12,6 +12,7 @@ const store_1 = require("./billing/store");
 const scan_1 = require("./scan");
 const enterprise_1 = require("./scan/enterprise");
 const riskSignals_1 = require("./scan/riskSignals");
+const advisories_1 = require("./scan/advisories");
 const npm_1 = require("./scan/ecosystems/npm");
 const pypi_1 = require("./scan/ecosystems/pypi");
 const db_1 = require("./db");
@@ -680,7 +681,23 @@ app.get("/api/check/package", async (req, res) => {
     if (!name || name.length > 214 || !/^[@a-z0-9._/-]+$/i.test(name))
         return res.status(400).json({ ok: false, error: "A valid package name is required" });
     try {
-        const verdict = await withTimeout((0, riskSignals_1.assessPackage)(name, ecosystem), 8_000);
+        // Threat-intel first: a confirmed malicious-package advisory is the strongest
+        // possible signal and supersedes any softer metadata heuristic. This lets the
+        // IDE extension flag realized slopsquat malware at suggestion-accept time.
+        const osvEcosystem = (0, advisories_1.osvEcosystemFor)(ecosystem.id);
+        const [verdict, malware] = await Promise.all([
+            withTimeout((0, riskSignals_1.assessPackage)(name, ecosystem), 8_000),
+            osvEcosystem ? withTimeout((0, advisories_1.queryMalwareAdvisories)([name], osvEcosystem), 8_000).catch(() => new Map()) : Promise.resolve(new Map()),
+        ]);
+        const advisory = malware.get(name);
+        if (advisory) {
+            return res.json({
+                ok: true, ecosystem: ecosystem.id, name, flagged: true, verdict: "known-malware", severity: "error",
+                osvId: advisory.osvId, reference: advisory.reference,
+                message: `Package "${name}" has a confirmed malicious-package advisory on the ${ecosystem.label} registry.${advisory.summary ? ` ${advisory.summary}` : ""} An attacker registered this name and published malware under it — do not install it.`,
+                remediation: `Remove "${name}", audit any machine that already installed it, and rotate exposed secrets. Advisory: ${advisory.reference ?? advisory.osvId}.`,
+            });
+        }
         if (!verdict)
             return res.json({ ok: true, ecosystem: ecosystem.id, name, flagged: false });
         const described = describePackageVerdict(ecosystem.label, verdict);
