@@ -194,14 +194,30 @@ fetch(`/api/runs/${encodeURIComponent(runId || "")}`, { credentials: "same-origi
     return body.run;
   })
   .then((run) => {
+    currentRun = run;
     titleEl.textContent = `Run ${run.id}`;
     subtitleEl.textContent = run.repository
       ? `${run.repository}${run.pullRequestNumber ? ` · pull request #${run.pullRequestNumber}` : ""}`
       : "Repository context unavailable";
 
-    const findingsHtml = run.findings.length
-      ? run.findings.map(findingCard).join("")
-      : "<p class='muted'>No findings were recorded for this run.</p>";
+    const findings = Array.isArray(run.findings) ? run.findings : [];
+    // Summary strip: total plus a chip per severity present, worst first.
+    const severityOrder = ["failure", "warning"];
+    const severityCounts = findings.reduce((acc, f) => {
+      acc[f.severity] = (acc[f.severity] || 0) + 1;
+      return acc;
+    }, {});
+    const summaryChips = [`<span class="summary-chip total">${findings.length} total</span>`]
+      .concat(severityOrder
+        .filter((severity) => severityCounts[severity])
+        .map((severity) => `<span class="summary-chip ${escapeHtml(severity)}">${severityCounts[severity]} ${escapeHtml(severity)}</span>`))
+      .join("");
+
+    // Category filter options come from the categories actually present in this run.
+    const categories = [...new Set(findings.map((f) => f.category).filter(Boolean))].sort();
+    const categoryOptions = ["<option value=\"all\">All categories</option>"]
+      .concat(categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`))
+      .join("");
 
     content.innerHTML = `
       <div class="meta">
@@ -210,11 +226,33 @@ fetch(`/api/runs/${encodeURIComponent(runId || "")}`, { credentials: "same-origi
         <div><div class="label">Verdict</div><div class="verdict ${escapeHtml(run.verdict || "")}">${escapeHtml(run.verdict || "Unavailable")}</div></div>
         <div><div class="label">Validation</div><div>${escapeHtml(run.status)}</div></div>
       </div>
+      <div class="filters" role="group" aria-label="Report exports">
+        <button type="button" class="export-btn" id="export-sarif">Export SARIF</button>
+        <button type="button" class="export-btn" id="export-cyclonedx">Export CycloneDX SBOM</button>
+      </div>
       <h2>Findings</h2>
-      ${findingsHtml}
+      <div class="summary" id="summary-strip">${summaryChips}</div>
+      <div class="filters">
+        <label>Severity
+          <select id="filter-severity">
+            <option value="all">All severities</option>
+            <option value="failure">Failure</option>
+            <option value="warning">Warning</option>
+          </select>
+        </label>
+        <label>Category
+          <select id="filter-category">${categoryOptions}</select>
+        </label>
+      </div>
+      <div id="findings-list"></div>
     `;
 
-    wireFixButtons(run);
+    document.getElementById("export-sarif").addEventListener("click", (event) => downloadExport("sarif", event.currentTarget));
+    document.getElementById("export-cyclonedx").addEventListener("click", (event) => downloadExport("cyclonedx", event.currentTarget));
+    document.getElementById("filter-severity").addEventListener("change", renderFindings);
+    document.getElementById("filter-category").addEventListener("change", renderFindings);
+
+    renderFindings();
   })
   .catch((error) => {
     titleEl.textContent = "Report unavailable";
