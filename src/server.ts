@@ -11,7 +11,7 @@ import { repositories, scanRuns, findings, auditEvents, installations, remediati
 import { handlePullRequestWebhook } from "./github/webhookHandler";
 import { getRedisClient } from "./lib/redis";
 import { getGumroadApiToken, verifyGumroadSale } from "./billing/gumroadConnect";
-import { getProRecord } from "./billing/store";
+import { getProRecord, isProActive } from "./billing/store";
 import { schedulePopularPackageRefresh } from "./scan/popularPackageRefresh";
 import { setInstallationCorpusOptOut, setPrivateCorpusOptIn } from "./telemetry/corpusLog";
 import { authorizeInstallationRepositoryWrite, authorizeRunAccess, isUuid, sessionTokenFromRequest } from "./auth/runAccess";
@@ -475,6 +475,24 @@ app.post("/api/runs/:runId/findings/:findingId/fix", async (req: Request, res: R
     if (!userToken) return res.status(401).json({ ok: false, error: "GitHub login required" });
     const writeAccess = await authorizeInstallationRepositoryWrite(userToken, row.installation.githubInstallationId, row.repository.githubRepositoryId, fetch);
     if (writeAccess !== "authorized") return res.status(403).json({ ok: false, status: "permission_required", error: "GitHub repository write permission is required" });
+    // Verified auto-fix (OSV lookup + remediation PR) is a Pro/Team/Enterprise
+    // capability — free tier gets the finding and the recommended remediation
+    // text, but not an automatically opened pull request.
+    let remediationProActive = false;
+    try {
+      remediationProActive = await isProActive(row.installation.accountLogin);
+    } catch (err) {
+      console.error(`Could not check Pro status for ${row.installation.accountLogin}, failing closed:`, err);
+      remediationProActive = false;
+    }
+    if (!remediationProActive) {
+      return res.status(402).json({
+        ok: false,
+        status: "upgrade_required",
+        error: "Automatic remediation pull requests require an active Pro plan.",
+        upgradeUrl: `${CANONICAL_BASE_URL}/subscribe?owner=${encodeURIComponent(row.installation.accountLogin)}&plan=pro`,
+      });
+    }
     const advisory = await resolveOsvAdvisory(ecosystem, finding.packageName, finding.currentVersion);
     if (!advisory?.fixedVersion) return res.status(409).json({ ok: false, status: "remediation_unavailable", error: "OSV did not provide enough data for a safe target" });
     const existing = (await db.select().from(remediations).where(and(eq(remediations.findingId, findingId), eq(remediations.targetVersion, advisory.fixedVersion))).limit(1))[0];
