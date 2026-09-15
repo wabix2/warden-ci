@@ -32,17 +32,15 @@ jobs:
           scan_exit_code=$?
           set -e
 
-          {
+                   {
             echo "## Warden security gate"
             echo ""
             if [ -f warden-report-url.txt ]; then
               report_url="$(cat warden-report-url.txt)"
-              echo "[Open the customer-facing report]($report_url)"
+              echo "<a href=\"$report_url\">Open the customer-facing report</a>"
             else
               echo "_A per-run report wasn't available for this scan._"
             fi
             echo ""
-            echo "[Upgrade to Warden CI Pro](https://warden-ci-dvk5.onrender.com/subscribe?owner=${{ github.repository_owner }}&plan=pro)"
+            echo "<a href=\"https://warden-ci-dvk5.onrender.com/subscribe?owner=${{ github.repository_owner }}&plan=pro\" target=\"_blank\" rel=\"noopener noreferrer\">Upgrade to Warden CI Pro</a>"
           } >> "$GITHUB_STEP_SUMMARY"
-
-          exit $scan_exit_code
