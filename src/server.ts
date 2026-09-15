@@ -6,9 +6,13 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { setProStatus, getOwnerForSale, addToWaitlist, getWaitlist } from "./billing/store";
 import { scanFiles, ScannedFile, type ScanAnnotation } from "./scan";
 import { defaultScanPolicy, evaluatePolicy, toCycloneDx, toSarif, redact } from "./scan/enterprise";
+import { assessPackage } from "./scan/riskSignals";
+import { npmEcosystem } from "./scan/ecosystems/npm";
+import { pypiEcosystem } from "./scan/ecosystems/pypi";
+import type { Ecosystem } from "./scan/ecosystems/types";
 import { db } from "./db";
 import { repositories, scanRuns, findings, auditEvents, installations, remediations, policies, policyVersions, suppressions } from "./db/schema";
-import { DEFAULT_POLICY, validatePolicy, evaluateGate, policyAuditEvent, type EnforcementPolicy, type PolicySuppression, type PolicyDecision } from "./enforcement/policy";
+import { DEFAULT_POLICY, validatePolicy, evaluateGate, policyAuditEvent, policyToCycloneDx, type EnforcementPolicy, type PolicySuppression, type PolicyDecision } from "./enforcement/policy";
 import { handlePullRequestWebhook } from "./github/webhookHandler";
 import { getRedisClient } from "./lib/redis";
 import { getGumroadApiToken, verifyGumroadSale } from "./billing/gumroadConnect";
@@ -29,6 +33,12 @@ import { CANONICAL_BASE_URL } from "./lib/publicUrl";
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const OAUTH_STATE_COOKIE = "warden_oauth_state";
+// Marks a GitHub OAuth flow that was started by an editor/CLI client rather than a
+// browser session. When present on the callback, the established session id is parked
+// in Redis under the client-supplied state so the extension can claim it once.
+const OAUTH_CLI_COOKIE = "warden_cli_state";
+const CLI_STATE_PATTERN = /^[a-f0-9]{16,64}$/i;
+const CLI_SESSION_TTL_SECONDS = 300;
 const SESSION_COOKIE = "warden_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 8;
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -436,10 +446,30 @@ app.get("/api/runs/:runId", async (req: Request, res: Response) => {
     const repository = (await db.select({ fullName: repositories.fullName, defaultBranch: repositories.defaultBranch })
       .from(repositories).innerJoin(scanRuns, eq(scanRuns.repositoryId, repositories.id)).where(eq(scanRuns.id, runId)).limit(1))[0];
     const reportFindings = await db.select({
-      id: findings.id, severity: findings.severity, category: findings.category, title: findings.title,
+      id: findings.id, fingerprint: findings.fingerprint, severity: findings.severity, category: findings.category, title: findings.title,
       message: findings.message, filePath: findings.filePath, lineNumber: findings.lineNumber,
       remediation: findings.remediation, packageName: findings.packageName, ecosystem: findings.ecosystem, manifestPath: findings.manifestPath, advisoryId: findings.advisoryId, affectedRange: findings.affectedRange, currentVersion: findings.currentVersion, status: findings.status, createdAt: findings.createdAt,
     }).from(findings).where(eq(findings.scanRunId, runId));
+
+    // Standard-format exports for the authorized run. SARIF reuses the enterprise
+    // exporter (all findings); CycloneDX reuses the enforcement exporter (dependency
+    // findings). redact() strips any secret-like tokens before download.
+    const format = String(req.query.format || "");
+    if (format === "sarif" || format === "cyclonedx") {
+      const annotations: ScanAnnotation[] = reportFindings.map((f) => ({
+        path: f.filePath || "", line: f.lineNumber || 0, message: f.message, title: f.title,
+        severity: f.severity === "warning" ? "warning" : "failure", category: f.category as ScanAnnotation["category"],
+        confidence: "high", remediation: f.remediation || "", fingerprint: f.fingerprint,
+        packageName: f.packageName || undefined, ecosystem: f.ecosystem || undefined, manifestPath: f.manifestPath || undefined,
+      }));
+      const document = format === "sarif"
+        ? toSarif({ annotations } as unknown as Parameters<typeof toSarif>[0])
+        : policyToCycloneDx(annotations);
+      const filename = `warden-run-${runId}.${format === "sarif" ? "sarif" : "cyclonedx"}.json`;
+      res.type(format === "sarif" ? "application/sarif+json" : "application/vnd.cyclonedx+json");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      return res.send(redact(JSON.stringify(document, null, 2)));
+    }
     return res.json({ ok: true, run: {
       id: access.run.id, scanTimestamp: access.run.completedAt || access.run.startedAt || access.run.createdAt,
       createdAt: access.run.createdAt, pullRequestNumber: access.run.pullRequestNumber,
@@ -544,12 +574,17 @@ app.get("/upgrade", (_req: Request, res: Response) => {
   res.redirect(302, "/subscribe?plan=pro");
 });
 
-app.get("/auth/github", async (_req: Request, res: Response) => {
+app.get("/auth/github", async (req: Request, res: Response) => {
   const clientId = process.env.GITHUB_OAUTH_CLIENT_ID;
   if (!clientId) return res.status(503).send("GitHub OAuth is not configured");
   const state = signOAuthState(randomBytes(24).toString("hex"));
-  const callback = `${canonicalOrigin(_req)}/auth/github/callback`;
-  res.setHeader("Set-Cookie", `${OAUTH_STATE_COOKIE}=${state}; HttpOnly; SameSite=Lax; Path=/${secureCookie(_req)}`);
+  const callback = `${canonicalOrigin(req)}/auth/github/callback`;
+  const cookies = [`${OAUTH_STATE_COOKIE}=${state}; HttpOnly; SameSite=Lax; Path=/${secureCookie(req)}`];
+  // Editor sign-in: the extension opens this URL with ?cli=<state> so the callback
+  // can hand the resulting session back to it out-of-band (see /api/cli/session).
+  const cliState = String(req.query.cli || "");
+  if (CLI_STATE_PATTERN.test(cliState)) cookies.push(`${OAUTH_CLI_COOKIE}=${cliState}; HttpOnly; SameSite=Lax; Path=/${secureCookie(req)}`);
+  res.setHeader("Set-Cookie", cookies);
   return res.redirect(`https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(callback)}&state=${encodeURIComponent(state)}&scope=`);
 });
 
@@ -568,7 +603,18 @@ app.get("/auth/github/callback", async (req: Request, res: Response) => {
     const sessionId = randomBytes(32).toString("hex");
     const session: OAuthSession = { accessToken: data.access_token, login: identity.login, expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000 };
     await getRedisClient().set(`warden:oauth:session:${sessionId}`, session, { ex: SESSION_TTL_SECONDS });
-    res.setHeader("Set-Cookie", `${SESSION_COOKIE}=${sessionId}; HttpOnly; SameSite=Lax; Path=/${secureCookie(req)}`);
+    const cookies = [`${SESSION_COOKIE}=${sessionId}; HttpOnly; SameSite=Lax; Path=/${secureCookie(req)}`];
+    // Editor sign-in handoff: park the session id under the client-supplied state
+    // (short TTL, single claim) and show a "return to your editor" page instead of
+    // redirecting to the dashboard the extension can't see.
+    const cliState = cookieValue(req, OAUTH_CLI_COOKIE);
+    if (cliState && CLI_STATE_PATTERN.test(cliState)) {
+      await getRedisClient().set(`warden:cli:token:${cliState}`, sessionId, { ex: CLI_SESSION_TTL_SECONDS });
+      cookies.push(`${OAUTH_CLI_COOKIE}=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/${secureCookie(req)}`);
+      res.setHeader("Set-Cookie", cookies);
+      return res.type("html").send("<!doctype html><html><body style=\"font-family:system-ui;max-width:560px;margin:48px auto;padding:16px\"><h1>Signed in to Warden</h1><p>You can close this window and return to your editor — Warden Check will finish connecting automatically.</p></body></html>");
+    }
+    res.setHeader("Set-Cookie", cookies);
     return res.redirect("/dashboard");
   } catch (error) {
     console.error("GitHub OAuth callback failed:", error);
@@ -592,6 +638,81 @@ app.get("/api/billing/status", async (req: Request, res: Response) => {
     console.error("Billing status read failed:", error);
     return res.status(502).json({ ok: false, error: "Could not load billing status" });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Editor/CLI support endpoints (Phase 2)
+//
+// The VS Code extension is the consumer. Package detection stays server-side so a
+// single source of truth (src/scan/riskSignals.ts) drives both PR scans and in-editor
+// checks — the extension never re-implements the heuristics and improves the moment
+// this deploys, with no extension update required.
+// ---------------------------------------------------------------------------
+
+const CLI_ECOSYSTEMS: Record<string, Ecosystem> = { npm: npmEcosystem, pypi: pypiEcosystem };
+
+// Turns an assessPackage verdict into the same wording the PR scanner uses, so the
+// extension can render a finding without duplicating message/remediation copy.
+function describePackageVerdict(label: string, v: NonNullable<Awaited<ReturnType<typeof assessPackage>>>): { severity: "error" | "warning"; message: string; remediation: string } {
+  switch (v.verdict) {
+    case "hallucinated":
+      return { severity: "error", message: `Package "${v.packageName}" was not found on the ${label} registry. If this was suggested by an AI tool, it may be a hallucinated package name — verify before installing, since attackers register exactly these invented names to distribute malware.`, remediation: `Confirm the package name on the ${label} registry and pin a trusted version before installing.` };
+    case "typosquat-suspect":
+      return { severity: "warning", message: `Package "${v.packageName}" exists but was only published ${v.publishedDaysAgo} day(s) ago and is a near-exact match for the popular package "${v.impersonating}". This is a common pattern for typosquat/slopsquat attacks — confirm this is the package you meant before installing.`, remediation: "Compare the package owner, repository, release history, and lockfile before adding this dependency." };
+    case "dependency-confusion-suspect":
+      return { severity: "warning", message: `Package "${v.packageName}" has a high major version (${v.latestVersion}) but a thin, recent release history — a review signal for possible version-shadowing behavior.`, remediation: "Compare this name against your private registries and lockfile policy, then verify the publisher and intended source before installing." };
+    default:
+      return { severity: "warning", message: `Package "${v.packageName}" appears to have a recent release from a different observed publisher (${v.latestPublisher ?? "unknown"}). Verify the release and publisher before installing.`, remediation: "Review the release provenance, publisher account, and lockfile before adding this dependency." };
+  }
+}
+
+// Unauthenticated, best-effort single-package risk check. No source code ever leaves
+// the editor — only a package name and ecosystem are sent. Covered by the global rate
+// limiter above.
+app.get("/api/check/package", async (req: Request, res: Response) => {
+  const ecosystemId = String(req.query.ecosystem || "").toLowerCase();
+  const name = String(req.query.name || "").trim();
+  const ecosystem = CLI_ECOSYSTEMS[ecosystemId];
+  if (!ecosystem) return res.status(400).json({ ok: false, error: "ecosystem must be one of: npm, pypi" });
+  if (!name || name.length > 214 || !/^[@a-z0-9._/-]+$/i.test(name)) return res.status(400).json({ ok: false, error: "A valid package name is required" });
+  try {
+    const verdict = await withTimeout(assessPackage(name, ecosystem), 8_000);
+    if (!verdict) return res.json({ ok: true, ecosystem: ecosystem.id, name, flagged: false });
+    const described = describePackageVerdict(ecosystem.label, verdict);
+    return res.json({ ok: true, ecosystem: ecosystem.id, name, flagged: true, verdict: verdict.verdict, impersonating: verdict.impersonating, publishedDaysAgo: verdict.publishedDaysAgo, ...described });
+  } catch (error) {
+    console.error(JSON.stringify({ event: "package_check_failed", requestId: res.locals.requestId, error: error instanceof Error ? error.message : "unknown" }));
+    // Fail open: an outage must never turn into a false "hallucinated" finding.
+    return res.status(200).json({ ok: true, ecosystem: ecosystem.id, name, flagged: false, degraded: true });
+  }
+});
+
+// Editor sign-in poll: returns the parked session id exactly once. The extension keeps
+// polling until `token` appears, then stores it in VS Code SecretStorage.
+app.get("/api/cli/session", async (req: Request, res: Response) => {
+  const state = String(req.query.state || "");
+  if (!CLI_STATE_PATTERN.test(state)) return res.status(400).json({ ok: false, error: "Invalid state" });
+  try {
+    const redis = getRedisClient();
+    const token = await redis.get<string>(`warden:cli:token:${state}`);
+    if (!token) return res.json({ ok: true, pending: true });
+    await redis.del(`warden:cli:token:${state}`);
+    return res.json({ ok: true, pending: false, token });
+  } catch (error) {
+    console.error("CLI session poll failed:", error);
+    return res.status(502).json({ ok: false, error: "Could not check sign-in status" });
+  }
+});
+
+// Free/Pro status for the extension status bar. Authenticated by the stored session id
+// (sent as the warden_session cookie by the extension). Fails closed to free.
+app.get("/api/cli/status", async (req: Request, res: Response) => {
+  const session = await getOAuthSession(req);
+  if (!session) return res.status(401).json({ ok: false, error: "Sign in to Warden first" });
+  let pro = false;
+  try { pro = await isProActive(session.login); }
+  catch (error) { console.error(`CLI Pro check failed for ${session.login}, treating as free:`, error); pro = false; }
+  return res.json({ ok: true, login: session.login, plan: pro ? "pro" : "free", pro });
 });
 
 app.get("/api/telemetry/settings", async (req: Request, res: Response) => {
@@ -971,7 +1092,7 @@ app.delete("/api/policy/suppressions/:id", async (req: Request, res: Response) =
 });
 
 /**
- * Renders TERMS.md / PRIVACY.md as a plain readable page. These MUST be reachable —
+ * Renders TERMS.md / PRIVACY.md as a plain readable page. These MUST be reachable ��
  * Gumroad's domain-approval process requires your site to link through to (or contain)
  * terms of service, a privacy notice, and a refund policy. Without these routes, the
  * footer links on the landing page 404, which is a likely cause of approval rejection.
