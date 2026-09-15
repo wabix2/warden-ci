@@ -2,12 +2,13 @@ import express, { Request, Response } from "express";
 import path from "path";
 import { readFileSync } from "fs";
 import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { setProStatus, getOwnerForSale, addToWaitlist, getWaitlist } from "./billing/store";
-import { scanFiles, ScannedFile } from "./scan";
+import { scanFiles, ScannedFile, type ScanAnnotation } from "./scan";
 import { defaultScanPolicy, evaluatePolicy, toCycloneDx, toSarif, redact } from "./scan/enterprise";
 import { db } from "./db";
-import { repositories, scanRuns, findings, auditEvents, installations, remediations } from "./db/schema";
+import { repositories, scanRuns, findings, auditEvents, installations, remediations, policies, policyVersions, suppressions } from "./db/schema";
+import { DEFAULT_POLICY, validatePolicy, evaluateGate, policyAuditEvent, type EnforcementPolicy, type PolicySuppression, type PolicyDecision } from "./enforcement/policy";
 import { handlePullRequestWebhook } from "./github/webhookHandler";
 import { getRedisClient } from "./lib/redis";
 import { getGumroadApiToken, verifyGumroadSale } from "./billing/gumroadConnect";
@@ -535,6 +536,10 @@ app.get("/dashboard", (_req: Request, res: Response) => {
   res.sendFile(path.join(__dirname, "..", "dashboard.html"));
 });
 
+app.get("/policy", (_req: Request, res: Response) => {
+  res.sendFile(path.join(__dirname, "..", "policy.html"));
+});
+
 app.get("/upgrade", (_req: Request, res: Response) => {
   res.redirect(302, "/subscribe?plan=pro");
 });
@@ -667,6 +672,301 @@ app.get("/api/dashboard/summary", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Dashboard summary error:", error);
     return res.status(500).json({ ok: false, error: "Could not load dashboard data" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Policy CRUD API (Phase 1)
+//
+// src/enforcement/policy.ts owns how a policy is validated and evaluated. Policies
+// are versioned: every save writes a new immutable row to warden_policy_versions,
+// and the highest version number is the active one. warden_policies keeps a
+// denormalized summary row (its boolean columns) in sync for other read paths, but
+// the jsonb stored in warden_policy_versions is authoritative.
+//
+// Suppressions are managed through the dedicated warden_suppressions table (owner is
+// stored in its created_by column), so the versioned policy JSON keeps its own
+// suppressions array empty and the table entries are merged in at evaluation time.
+//
+// Per-repository policy storage does not exist in the current schema — policies are
+// keyed by installation only — so an optional repositoryId is recorded in the audit
+// trail for forward compatibility, but the effective policy is the installation
+// policy merged over DEFAULT_POLICY.
+// ---------------------------------------------------------------------------
+
+function policyFieldForError(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes("mode")) return "mode";
+  if (lower.includes("minimumseverity")) return "minimumSeverity";
+  if (lower.includes("blockcategories")) return "blockCategories";
+  if (lower.includes("ignoredpaths")) return "ignoredPaths";
+  if (lower.includes("ignoredpackages")) return "ignoredPackages";
+  if (lower.includes("suppression")) return "suppressions";
+  if (lower.includes("schema")) return "schema";
+  return "policy";
+}
+
+type SuppressionRow = typeof suppressions.$inferSelect;
+
+function tableSuppressionsToPolicy(rows: SuppressionRow[]): PolicySuppression[] {
+  // Only rows with an expiry can satisfy validatePolicy's required fields. The POST
+  // route enforces expiry, so this filter just protects against legacy/null rows.
+  return rows
+    .filter((row) => row.expiresAt)
+    .map((row) => ({ id: row.id, fingerprint: row.fingerprint || undefined, reason: row.reason, owner: row.createdBy, expiresAt: new Date(row.expiresAt as Date).toISOString() }));
+}
+
+async function loadPolicyBase(installationUuid: string): Promise<{ policy: EnforcementPolicy; version: number | null }> {
+  if (!db) return { policy: DEFAULT_POLICY, version: null };
+  const latest = (await db.select().from(policyVersions).where(eq(policyVersions.installationId, installationUuid)).orderBy(desc(policyVersions.version)).limit(1))[0];
+  if (!latest) return { policy: DEFAULT_POLICY, version: null };
+  try {
+    return { policy: validatePolicy(latest.policy), version: latest.version };
+  } catch (error) {
+    console.error("Stored policy failed validation, falling back to default:", error);
+    return { policy: DEFAULT_POLICY, version: null };
+  }
+}
+
+// Effective policy actually used to gate a scan: the versioned base policy with the
+// suppressions table merged into its suppressions array.
+async function loadEffectivePolicy(installationUuid: string): Promise<EnforcementPolicy> {
+  const base = await loadPolicyBase(installationUuid);
+  if (!db) return base.policy;
+  const rows = await db.select().from(suppressions).where(eq(suppressions.installationId, installationUuid));
+  try {
+    return validatePolicy({ ...base.policy, suppressions: [...base.policy.suppressions, ...tableSuppressionsToPolicy(rows)] });
+  } catch {
+    return base.policy;
+  }
+}
+
+// Shared auth gate for the policy routes — mirrors /api/billing/status and
+// /api/telemetry/settings exactly (session via getOAuthSession, ownership via
+// dashboardInstallation). Writes the error response itself and returns null so the
+// caller just returns.
+async function resolveDashboardInstallation(req: Request, res: Response, installationId: number): Promise<{ id: string; accountLogin: string } | null> {
+  const authorized = await dashboardInstallation(req, installationId);
+  if (authorized === null) { res.status(401).json({ ok: false, error: "GitHub login required" }); return null; }
+  if (!authorized) { res.status(403).json({ ok: false, error: "Installation is not authorized for this GitHub account" }); return null; }
+  if (!db) { res.status(503).json({ ok: false, error: "Database unavailable" }); return null; }
+  const installation = (await db.select({ id: installations.id, accountLogin: installations.accountLogin }).from(installations).where(eq(installations.githubInstallationId, installationId)).limit(1))[0];
+  if (!installation) { res.status(404).json({ ok: false, error: "Installation not found" }); return null; }
+  return installation;
+}
+
+// Lets the policy page populate its installation selector regardless of entry point.
+app.get("/api/policy/installations", async (req: Request, res: Response) => {
+  const session = await getOAuthSession(req);
+  if (!session) return res.status(401).json({ ok: false, error: "GitHub login required" });
+  if (!db) return res.status(503).json({ ok: false, error: "Database unavailable" });
+  try {
+    const rows = await db.select({ installationId: installations.githubInstallationId, accountLogin: installations.accountLogin }).from(installations).where(eq(installations.accountLogin, session.login));
+    return res.json({ ok: true, installations: rows });
+  } catch (error) {
+    console.error("Policy installations read failed:", error);
+    return res.status(502).json({ ok: false, error: "Could not load installations" });
+  }
+});
+
+app.get("/api/policy", async (req: Request, res: Response) => {
+  const installationId = Number(req.query.installationId);
+  if (!Number.isSafeInteger(installationId) || installationId <= 0) return res.status(400).json({ ok: false, error: "Invalid installation ID" });
+  try {
+    const installation = await resolveDashboardInstallation(req, res, installationId);
+    if (!installation) return;
+    const base = await loadPolicyBase(installation.id);
+    const suppressionRows = await db!.select().from(suppressions).where(eq(suppressions.installationId, installation.id)).orderBy(desc(suppressions.createdAt));
+    const versionRows = await db!.select({ version: policyVersions.version, createdBy: policyVersions.createdBy, createdAt: policyVersions.createdAt }).from(policyVersions).where(eq(policyVersions.installationId, installation.id)).orderBy(desc(policyVersions.version)).limit(50);
+    let isPro = false;
+    try { isPro = await isProActive(installation.accountLogin); }
+    catch (error) { console.error("Pro check failed while loading policy, treating as free:", error); isPro = false; }
+    return res.json({
+      ok: true,
+      installationId,
+      owner: installation.accountLogin,
+      isPro,
+      activeVersion: base.version,
+      policy: base.policy,
+      suppressions: suppressionRows.map((row) => ({ id: row.id, fingerprint: row.fingerprint, reason: row.reason, owner: row.createdBy, expiresAt: row.expiresAt })),
+      history: versionRows,
+    });
+  } catch (error) {
+    console.error("Policy read failed:", error);
+    return res.status(502).json({ ok: false, error: "Could not load policy" });
+  }
+});
+
+app.put("/api/policy", async (req: Request, res: Response) => {
+  const installationId = Number(req.body?.installationId);
+  if (!Number.isSafeInteger(installationId) || installationId <= 0) return res.status(400).json({ ok: false, error: "Invalid installation ID" });
+  try {
+    const installation = await resolveDashboardInstallation(req, res, installationId);
+    if (!installation) return;
+    const session = await getOAuthSession(req);
+    const actor = session?.login ?? "unknown";
+
+    let validated: EnforcementPolicy;
+    try {
+      validated = validatePolicy(req.body?.policy);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid policy";
+      return res.status(422).json({ ok: false, error: message, field: policyFieldForError(message) });
+    }
+
+    // Block-mode enforcement is a paid capability, gated on the same isProActive
+    // pattern as the remediation route. Fail closed: any error verifying entitlement
+    // must NOT let a block-mode policy be saved.
+    if (validated.mode === "block") {
+      let pro = false;
+      try { pro = await isProActive(installation.accountLogin); }
+      catch (error) { console.error(`Pro check failed for ${installation.accountLogin} on policy save, failing closed:`, error); pro = false; }
+      if (!pro) {
+        return res.status(402).json({ ok: false, status: "upgrade_required", field: "mode", error: "Block mode enforcement requires an active Pro plan. Report mode stays free.", upgradeUrl: `${CANONICAL_BASE_URL}/subscribe?owner=${encodeURIComponent(installation.accountLogin)}&plan=pro` });
+      }
+    }
+
+    const current = (await db!.select({ version: policyVersions.version }).from(policyVersions).where(eq(policyVersions.installationId, installation.id)).orderBy(desc(policyVersions.version)).limit(1))[0];
+    const nextVersion = (current?.version ?? 0) + 1;
+    const stored: EnforcementPolicy = { ...validated, suppressions: [], revision: nextVersion, inheritedFrom: current ? `revision:${current.version}` : undefined };
+
+    await db!.insert(policyVersions).values({ installationId: installation.id, version: nextVersion, policy: stored, createdBy: actor });
+    const summary = {
+      mode: stored.mode,
+      minimumSeverity: stored.minimumSeverity,
+      blockSecrets: stored.blockCategories.includes("secret"),
+      blockMaliciousPackages: stored.blockCategories.includes("dependency"),
+      blockDangerousExec: stored.blockCategories.includes("execution"),
+      requireCleanBaseline: stored.requireCleanBaseline,
+      updatedAt: new Date(),
+    };
+    await db!.insert(policies).values({ installationId: installation.id, ...summary }).onConflictDoUpdate({ target: policies.installationId, set: summary });
+
+    const audit = policyAuditEvent(stored, actor, current ? "updated" : "created");
+    await db!.insert(auditEvents).values({ installationId: installation.id, actor, eventType: "policy.updated", target: `policy:v${nextVersion}${req.body?.repositoryId ? `:repo:${String(req.body.repositoryId)}` : ""}`, metadata: audit });
+
+    return res.json({ ok: true, activeVersion: nextVersion, policy: stored });
+  } catch (error) {
+    console.error("Policy write failed:", error);
+    return res.status(502).json({ ok: false, error: "Could not save policy" });
+  }
+});
+
+app.get("/api/policy/versions", async (req: Request, res: Response) => {
+  const installationId = Number(req.query.installationId);
+  if (!Number.isSafeInteger(installationId) || installationId <= 0) return res.status(400).json({ ok: false, error: "Invalid installation ID" });
+  try {
+    const installation = await resolveDashboardInstallation(req, res, installationId);
+    if (!installation) return;
+    const rows = await db!.select().from(policyVersions).where(eq(policyVersions.installationId, installation.id)).orderBy(desc(policyVersions.version)).limit(100);
+    return res.json({ ok: true, versions: rows.map((row) => ({ version: row.version, createdBy: row.createdBy, createdAt: row.createdAt, mode: (row.policy as EnforcementPolicy)?.mode, minimumSeverity: (row.policy as EnforcementPolicy)?.minimumSeverity, policy: row.policy })) });
+  } catch (error) {
+    console.error("Policy versions read failed:", error);
+    return res.status(502).json({ ok: false, error: "Could not load policy history" });
+  }
+});
+
+// Live preview: evaluate a proposed policy against the most recent scan run's stored
+// findings and return the blocking/suppressed/ignored counts vs. the current policy.
+app.post("/api/policy/preview", async (req: Request, res: Response) => {
+  const installationId = Number(req.body?.installationId);
+  if (!Number.isSafeInteger(installationId) || installationId <= 0) return res.status(400).json({ ok: false, error: "Invalid installation ID" });
+  try {
+    const installation = await resolveDashboardInstallation(req, res, installationId);
+    if (!installation) return;
+
+    let proposed: EnforcementPolicy;
+    try { proposed = validatePolicy(req.body?.policy); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid policy";
+      return res.status(422).json({ ok: false, error: message, field: policyFieldForError(message) });
+    }
+
+    const repoRows = await db!.select({ id: repositories.id }).from(repositories).where(eq(repositories.installationId, installation.id));
+    const repoIds = repoRows.map((row) => row.id);
+    if (repoIds.length === 0) return res.json({ ok: true, hasRun: false, findings: 0, current: null, proposed: null, delta: 0 });
+    const latestRun = (await db!.select().from(scanRuns).where(inArray(scanRuns.repositoryId, repoIds)).orderBy(desc(scanRuns.createdAt)).limit(1))[0];
+    if (!latestRun) return res.json({ ok: true, hasRun: false, findings: 0, current: null, proposed: null, delta: 0 });
+    const runFindings = await db!.select().from(findings).where(eq(findings.scanRunId, latestRun.id));
+    const annotations: ScanAnnotation[] = runFindings.map((f) => ({
+      path: f.filePath || "",
+      line: f.lineNumber || 0,
+      message: f.message,
+      title: f.title,
+      severity: f.severity === "warning" ? "warning" : "failure",
+      category: f.category as ScanAnnotation["category"],
+      confidence: "high",
+      remediation: f.remediation || "",
+      fingerprint: f.fingerprint,
+      packageName: f.packageName || undefined,
+      ecosystem: f.ecosystem || undefined,
+      manifestPath: f.manifestPath || undefined,
+    }));
+
+    const tableRows = await db!.select().from(suppressions).where(eq(suppressions.installationId, installation.id));
+    const tableSup = tableSuppressionsToPolicy(tableRows);
+    const currentBase = await loadPolicyBase(installation.id);
+    const currentPolicy = validatePolicy({ ...currentBase.policy, suppressions: [...currentBase.policy.suppressions, ...tableSup] });
+    const proposedPolicy = validatePolicy({ ...proposed, suppressions: [...proposed.suppressions, ...tableSup] });
+
+    const summarize = (d: PolicyDecision) => ({ blocking: d.blocking.length, suppressed: d.suppressed.length, ignored: d.ignored.length, shouldBlock: d.shouldBlock, verdict: d.verdict });
+    const currentDecision = evaluateGate(annotations, currentPolicy);
+    const proposedDecision = evaluateGate(annotations, proposedPolicy);
+    return res.json({
+      ok: true,
+      hasRun: true,
+      runId: latestRun.id,
+      findings: annotations.length,
+      current: summarize(currentDecision),
+      proposed: summarize(proposedDecision),
+      delta: proposedDecision.blocking.length - currentDecision.blocking.length,
+    });
+  } catch (error) {
+    console.error("Policy preview failed:", error);
+    return res.status(502).json({ ok: false, error: "Could not evaluate policy preview" });
+  }
+});
+
+app.post("/api/policy/suppressions", async (req: Request, res: Response) => {
+  const installationId = Number(req.body?.installationId);
+  if (!Number.isSafeInteger(installationId) || installationId <= 0) return res.status(400).json({ ok: false, error: "Invalid installation ID" });
+  try {
+    const installation = await resolveDashboardInstallation(req, res, installationId);
+    if (!installation) return;
+    const session = await getOAuthSession(req);
+    const fingerprint = String(req.body?.fingerprint || "").trim();
+    const reason = String(req.body?.reason || "").trim();
+    const owner = String(req.body?.owner || "").trim();
+    const expiresAt = String(req.body?.expiresAt || "").trim();
+    // Mirror validatePolicy's suppression requirements: owner, reason, expiresAt (+
+    // fingerprint, which the table requires and the gate matches on).
+    if (!fingerprint || !reason || !owner || !expiresAt || Number.isNaN(Date.parse(expiresAt))) {
+      return res.status(422).json({ ok: false, error: "Suppression requires fingerprint, owner, reason, and a valid expiry date" });
+    }
+    const inserted = (await db!.insert(suppressions).values({ installationId: installation.id, fingerprint, reason, expiresAt: new Date(expiresAt), createdBy: owner }).onConflictDoUpdate({ target: [suppressions.installationId, suppressions.fingerprint], set: { reason, expiresAt: new Date(expiresAt), createdBy: owner } }).returning({ id: suppressions.id }))[0];
+    await db!.insert(auditEvents).values({ installationId: installation.id, actor: session?.login ?? owner, eventType: "policy.suppression.created", target: `suppression:${fingerprint}`, metadata: { fingerprint, owner, reason, expiresAt } });
+    return res.status(201).json({ ok: true, id: inserted?.id });
+  } catch (error) {
+    console.error("Suppression create failed:", error);
+    return res.status(502).json({ ok: false, error: "Could not save suppression" });
+  }
+});
+
+app.delete("/api/policy/suppressions/:id", async (req: Request, res: Response) => {
+  const session = await getOAuthSession(req);
+  if (!session) return res.status(401).json({ ok: false, error: "GitHub login required" });
+  if (!db) return res.status(503).json({ ok: false, error: "Database unavailable" });
+  const id = String(req.params.id || "");
+  if (!isUuid(id)) return res.status(404).json({ ok: false, error: "Suppression not found" });
+  try {
+    const row = (await db.select({ id: suppressions.id, installationUuid: installations.id, accountLogin: installations.accountLogin }).from(suppressions).innerJoin(installations, eq(suppressions.installationId, installations.id)).where(eq(suppressions.id, id)).limit(1))[0];
+    if (!row || row.accountLogin.toLowerCase() !== session.login.toLowerCase()) return res.status(404).json({ ok: false, error: "Suppression not found" });
+    await db.delete(suppressions).where(eq(suppressions.id, id));
+    await db.insert(auditEvents).values({ installationId: row.installationUuid, actor: session.login, eventType: "policy.suppression.deleted", target: `suppression:${id}`, metadata: {} });
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("Suppression delete failed:", error);
+    return res.status(502).json({ ok: false, error: "Could not delete suppression" });
   }
 });
 
@@ -936,55 +1236,85 @@ app.post("/api/scan", async (req: Request, res: Response) => {
   const files = Array.isArray(req.body?.files) ? req.body.files as ScannedFile[] : [];
   if (files.length === 0 || files.length > 250) return res.status(400).json({ ok: false, error: "files must contain 1-250 changed files" });
   try {
-    const result = await withTimeout(scanFiles(files));
-    const policy = evaluatePolicy(result, defaultScanPolicy);
-
-    // Optional: persist this scan so a real, authorized report link can be
-    // generated for CI-triggered scans. Previously only webhook-triggered
-    // scans were ever persisted, so /details?runId=... could never resolve
-    // for anything run through this endpoint — the workflow had nothing to
-    // link to. Persistence is best-effort and never affects the scan/gate
-    // result itself: a DB or lookup failure here must not change the
-    // pass/fail verdict the calling CI job relies on.
-    let runId: string | undefined;
     const githubRepositoryId = Number(req.body?.githubRepositoryId);
     const commitSha = typeof req.body?.commitSha === "string" ? req.body.commitSha.trim() : "";
-    if (db && Number.isSafeInteger(githubRepositoryId) && githubRepositoryId > 0 && commitSha) {
+
+    // Resolve repository/installation context up front so a stored policy can drive
+    // the scan verdict (via scanFiles -> evaluateGate), not just the built-in default.
+    // Best effort: any failure here falls back to the default gate. Block-mode
+    // enforcement is a paid capability, so it is coerced to report mode unless Pro is
+    // verified live — failing closed means an error never enforces paid blocking and
+    // never breaks a CI job over our own outage.
+    let effectivePolicy: EnforcementPolicy | undefined;
+    let repositoryId: string | undefined;
+    if (db && Number.isSafeInteger(githubRepositoryId) && githubRepositoryId > 0) {
       try {
-        const repoRow = (await db.select({ id: repositories.id }).from(repositories)
+        const repoRow = (await db.select({ id: repositories.id, installationId: repositories.installationId }).from(repositories)
           .where(eq(repositories.githubRepositoryId, githubRepositoryId)).limit(1))[0];
-        // No matching repository means the GitHub App isn't installed on
-        // this repo — there's no authorized owner to attach a report to,
-        // so skip persistence rather than inventing one.
+        // No matching repository means the GitHub App isn't installed on this repo —
+        // there's no authorized owner to attach a report or policy to.
         if (repoRow) {
-          const verdict = policy.verdict === "fail" ? "failure" : result.verdict === "incomplete" ? "incomplete" : "success";
-          const inserted = (await db.insert(scanRuns).values({
-            repositoryId: repoRow.id,
-            commitSha,
-            status: "completed",
-            verdict,
-            findingsCount: result.annotations.length,
-            startedAt: new Date(),
-            completedAt: new Date(),
-          }).returning({ id: scanRuns.id }))[0];
-          if (inserted) {
-            runId = inserted.id;
-            if (result.annotations.length > 0) {
-              await db.insert(findings).values(result.annotations.map((annotation, index) => ({
-                scanRunId: inserted.id,
-                fingerprint: annotation.fingerprint || `${annotation.path}:${annotation.line}:${annotation.title}:${index}`,
-                severity: annotation.severity,
-                category: annotation.category,
-                title: annotation.title,
-                message: annotation.message,
-                remediation: annotation.remediation,
-                packageName: annotation.packageName,
-                ecosystem: annotation.ecosystem,
-                manifestPath: annotation.manifestPath,
-                filePath: annotation.path,
-                lineNumber: annotation.line,
-              })));
+          repositoryId = repoRow.id;
+          const installation = (await db.select({ id: installations.id, accountLogin: installations.accountLogin }).from(installations).where(eq(installations.id, repoRow.installationId)).limit(1))[0];
+          if (installation) {
+            const stored = await loadEffectivePolicy(installation.id);
+            let policy = stored;
+            if (policy.mode === "block") {
+              let pro = false;
+              try { pro = await isProActive(installation.accountLogin); }
+              catch (proError) { console.error(`Could not verify Pro for ${installation.accountLogin} during scan gate, failing closed to report mode:`, proError); pro = false; }
+              if (!pro) policy = { ...policy, mode: "report" };
             }
+            effectivePolicy = policy;
+          }
+        }
+      } catch (policyError) {
+        console.error(JSON.stringify({ event: "scan_policy_load_failed", requestId: res.locals.requestId, error: policyError instanceof Error ? policyError.message : "unknown" }));
+      }
+    }
+
+    const result = await withTimeout(scanFiles(files, effectivePolicy));
+    // Keep the legacy enterprise policy summary in the response for backward
+    // compatibility; when a stored policy applies, its gate decision (result.policyDecision)
+    // is the source of truth for the persisted verdict.
+    const enterprisePolicy = evaluatePolicy(result, defaultScanPolicy);
+    const gate = result.policyDecision;
+    const verdict = effectivePolicy
+      ? (gate.shouldBlock ? "failure" : result.verdict === "incomplete" ? "incomplete" : "success")
+      : (enterprisePolicy.verdict === "fail" ? "failure" : result.verdict === "incomplete" ? "incomplete" : "success");
+
+    // Optional: persist this scan so a real, authorized report link can be
+    // generated for CI-triggered scans. Persistence is best-effort and never
+    // affects the scan/gate result the calling CI job relies on.
+    let runId: string | undefined;
+    if (db && repositoryId && commitSha) {
+      try {
+        const inserted = (await db.insert(scanRuns).values({
+          repositoryId,
+          commitSha,
+          status: "completed",
+          verdict,
+          findingsCount: result.annotations.length,
+          startedAt: new Date(),
+          completedAt: new Date(),
+        }).returning({ id: scanRuns.id }))[0];
+        if (inserted) {
+          runId = inserted.id;
+          if (result.annotations.length > 0) {
+            await db.insert(findings).values(result.annotations.map((annotation, index) => ({
+              scanRunId: inserted.id,
+              fingerprint: annotation.fingerprint || `${annotation.path}:${annotation.line}:${annotation.title}:${index}`,
+              severity: annotation.severity,
+              category: annotation.category,
+              title: annotation.title,
+              message: annotation.message,
+              remediation: annotation.remediation,
+              packageName: annotation.packageName,
+              ecosystem: annotation.ecosystem,
+              manifestPath: annotation.manifestPath,
+              filePath: annotation.path,
+              lineNumber: annotation.line,
+            })));
           }
         }
       } catch (persistError) {
@@ -993,7 +1323,7 @@ app.post("/api/scan", async (req: Request, res: Response) => {
     }
 
     const format = String(req.query.format || "json");
-    const payload = format === "sarif" ? toSarif(result) : format === "cyclonedx" ? toCycloneDx(result) : { ok: true, ...result, policy, runId };
+    const payload = format === "sarif" ? toSarif(result) : format === "cyclonedx" ? toCycloneDx(result) : { ok: true, ...result, policy: enterprisePolicy, verdict, runId };
     res.type(format === "sarif" ? "application/sarif+json" : "application/json");
     return res.json(JSON.parse(redact(JSON.stringify(payload))));
   } catch (error) {
