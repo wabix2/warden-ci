@@ -1,7 +1,7 @@
 import { Ecosystem } from "./ecosystems/types";
 import { levenshtein } from "./levenshtein";
 
-export type Verdict = "hallucinated" | "typosquat-suspect" | "dependency-confusion-suspect" | "maintainer-takeover-suspect";
+export type Verdict = "hallucinated" | "typosquat-suspect" | "dependency-confusion-suspect" | "maintainer-takeover-suspect" | "known-malware";
 
 export interface PackageVerdict {
   packageName: string;

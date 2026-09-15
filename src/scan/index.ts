@@ -3,6 +3,7 @@ import { parseAddedLines } from "./diff";
 import { checkSecrets } from "./secrets";
 import { checkDangerousExec } from "./dangerousExec";
 import { assessPackage, PackageVerdict } from "./riskSignals";
+import { queryMalwareAdvisories, osvEcosystemFor, MalwareAdvisory } from "./advisories";
 import { npmEcosystem } from "./ecosystems/npm";
 import { pypiEcosystem } from "./ecosystems/pypi";
 import { Ecosystem } from "./ecosystems/types";
@@ -69,6 +70,33 @@ async function checkPackageRisk(
   const flags: PackageFlag[] = [];
   const packages = [...linesByPackage.keys()];
 
+  // Live threat-intel pass: cross-reference every dependency against OSV's
+  // malicious-package feed. A confirmed `MAL-` advisory supersedes the softer
+  // metadata heuristics below — it means the invented/typo'd name is not just
+  // suspicious, it is already weaponized.
+  const osvEcosystem = osvEcosystemFor(ecosystem.id);
+  const malwareByPackage: Map<string, MalwareAdvisory> = osvEcosystem
+    ? await queryMalwareAdvisories(packages, osvEcosystem)
+    : new Map();
+
+  for (const [pkg, advisory] of malwareByPackage) {
+    flags.push({ ecosystem: ecosystem.id, verdict: "known-malware", packageName: pkg });
+    const summary = advisory.summary ? ` ${advisory.summary}` : "";
+    const evidence = advisory.reference ? ` See ${advisory.reference} (${advisory.osvId}).` : ` Advisory ${advisory.osvId}.`;
+    for (const line of linesByPackage.get(pkg)!) {
+      annotations.push({
+        line,
+        title: "Known malicious package",
+        severity: "failure",
+        message: `Package "${pkg}" has a confirmed malicious-package advisory on the ${ecosystem.label} registry.${summary} This is the realized form of a slopsquat/typosquat attack — an attacker registered this name and published malware under it.${evidence} Do not install or merge this dependency.`,
+        category: "dependency",
+        confidence: "high",
+        remediation: `Remove "${pkg}", audit any machine that already installed it for compromise, and rotate secrets exposed to it.`,
+        fingerprint: `dependency:${ecosystem.id}:${pkg}:malware:${advisory.osvId}`,
+      });
+    }
+  }
+
   const CONCURRENCY = 8;
   for (let i = 0; i < packages.length; i += CONCURRENCY) {
     const batch = packages.slice(i, i + CONCURRENCY);
@@ -76,6 +104,9 @@ async function checkPackageRisk(
     batch.forEach((pkg, idx) => {
       const verdict = results[idx];
       if (!verdict) return;
+      // A confirmed malware advisory already spoke for this package; don't
+      // dilute a hard failure with a softer, redundant heuristic finding.
+      if (malwareByPackage.has(pkg)) return;
 
       flags.push({ ecosystem: ecosystem.id, verdict: verdict.verdict, packageName: pkg, impersonating: verdict.impersonating, latestVersion: verdict.latestVersion, latestPublisher: verdict.latestPublisher });
 

@@ -9,6 +9,7 @@
     "test:run-authorization": "pnpm build && node --test scripts/test-run-authorization.mjs",
     "test:popular": "pnpm build && node --test scripts/test-popular-packages.mjs",
     "test:package-risk": "pnpm build && node --test scripts/test-package-risk-signals.mjs",
+    "test:advisories": "pnpm build && node --test scripts/test-advisories.mjs",
     "test:corpus-privacy": "pnpm build && node --test scripts/test-corpus-privacy.mjs",
     "warden-scan": "node scripts/warden-scan.mjs",
     "db:ownership:report": "node scripts/backfill-run-ownership.mjs",

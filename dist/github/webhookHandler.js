@@ -26,6 +26,7 @@ function summaryFor(annotations, filesScanned, filesSkipped) {
         return `Scanned ${filesScanned} changed file(s). No unverified packages, hardcoded secrets, or dangerous dynamic execution found in the added code.` +
             (filesSkipped > 0 ? `\n\n_${filesSkipped} file(s) were skipped (binary or too large for GitHub to provide a diff).` : "");
     }
+    const malwareCount = annotations.filter((a) => a.title === "Known malicious package").length;
     const secretCount = annotations.filter((a) => a.title === "Possible hardcoded secret").length;
     const pkgCount = annotations.filter((a) => a.title === "Unverified package").length;
     const typosquatCount = annotations.filter((a) => a.title === "Possible typosquat package").length;
@@ -33,6 +34,8 @@ function summaryFor(annotations, filesScanned, filesSkipped) {
     const takeoverCount = annotations.filter((a) => a.title === "Possible maintainer takeover").length;
     const execCount = annotations.filter((a) => a.title === "Dangerous dynamic execution").length;
     const parts = [];
+    if (malwareCount)
+        parts.push(`${malwareCount} known malicious package(s)`);
     if (secretCount)
         parts.push(`${secretCount} possible hardcoded secret(s)`);
     if (typosquatCount)
