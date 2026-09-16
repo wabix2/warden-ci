@@ -47,11 +47,7 @@ async function fetchMetadata(packageName) {
             // 404 = genuinely doesn't exist. Any other non-OK status is treated as
             // "exists" (fail open) since we can't distinguish a real 404 from a
             // registry hiccup any other way with this endpoint.
-<<<<<<< HEAD
             return { existsOnRegistry: false, lookupStatus: res.status === 404 ? "not_found" : "unavailable" };
-=======
-            return { existsOnRegistry: res.status !== 404 };
->>>>>>> origin/main
         }
         const data = (await res.json());
         const created = data.time?.created;
@@ -64,19 +60,11 @@ async function fetchMetadata(packageName) {
         const previousPublisher = publisherSequence.at(-2);
         const publishedDaysAgo = created ? Math.floor((Date.now() - new Date(created).getTime()) / (1000 * 60 * 60 * 24)) : undefined;
         const latestReleaseDaysAgo = latestRelease ? Math.floor((Date.now() - new Date(latestRelease).getTime()) / (1000 * 60 * 60 * 24)) : undefined;
-<<<<<<< HEAD
         return { lookupStatus: "ok", existsOnRegistry: true, publishedDaysAgo, latestVersion, releaseCount: releaseTimes.length, publisherHistory, latestPublisher, publisherChangedRecently: Boolean(latestPublisher && previousPublisher && latestPublisher !== previousPublisher), latestReleaseDaysAgo };
     }
     catch (err) {
         console.error(`npm metadata lookup failed for "${packageName}":`, err);
         return { existsOnRegistry: false, lookupStatus: "unavailable" };
-=======
-        return { existsOnRegistry: true, publishedDaysAgo, latestVersion, releaseCount: releaseTimes.length, publisherHistory, latestPublisher, publisherChangedRecently: Boolean(latestPublisher && previousPublisher && latestPublisher !== previousPublisher), latestReleaseDaysAgo };
-    }
-    catch (err) {
-        console.error(`npm metadata lookup failed for "${packageName}":`, err);
-        return { existsOnRegistry: true }; // fail open on network errors
->>>>>>> origin/main
     }
 }
 exports.npmEcosystem = {

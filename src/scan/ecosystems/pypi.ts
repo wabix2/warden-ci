@@ -40,11 +40,7 @@ async function fetchMetadata(packageName: string): Promise<PackageMetadata> {
   try {
     const res = await fetch(`https://pypi.org/pypi/${encodeURIComponent(packageName)}/json`);
     if (!res.ok) {
-<<<<<<< HEAD
       return { existsOnRegistry: false, lookupStatus: res.status === 404 ? "not_found" : "unavailable" };
-=======
-      return { existsOnRegistry: res.status !== 404 };
->>>>>>> origin/main
     }
     // PyPI JSON exposes release files and upload timestamps, but no per-release
     // uploader identity. Maintainer-takeover detection is therefore npm-only.
@@ -59,17 +55,10 @@ async function fetchMetadata(packageName: string): Promise<PackageMetadata> {
     }
     const publishedDaysAgo = earliest !== undefined ? Math.floor((Date.now() - earliest) / (1000 * 60 * 60 * 24)) : undefined;
     const releaseCount = Object.keys(data.releases ?? {}).length;
-<<<<<<< HEAD
     return { lookupStatus: "ok", existsOnRegistry: true, publishedDaysAgo, latestVersion: data.info?.version, releaseCount };
   } catch (err) {
     console.error(`PyPI metadata lookup failed for "${packageName}":`, err);
     return { existsOnRegistry: false, lookupStatus: "unavailable" };
-=======
-    return { existsOnRegistry: true, publishedDaysAgo, latestVersion: data.info?.version, releaseCount };
-  } catch (err) {
-    console.error(`PyPI metadata lookup failed for "${packageName}":`, err);
-    return { existsOnRegistry: true };
->>>>>>> origin/main
   }
 }
 

@@ -1,15 +1,10 @@
 import { AddedLine } from "../diff";
 
-<<<<<<< HEAD
 export type MetadataLookupStatus = "ok" | "not_found" | "unavailable";
 
 export interface PackageMetadata {
   existsOnRegistry: boolean;
   lookupStatus?: MetadataLookupStatus;
-=======
-export interface PackageMetadata {
-  existsOnRegistry: boolean;
->>>>>>> origin/main
   /** Days since the package's earliest known release. Undefined if unknown or lookup failed. */
   publishedDaysAgo?: number;
   /** Latest published semantic version, when the registry exposes one. */

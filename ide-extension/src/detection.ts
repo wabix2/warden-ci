@@ -10,11 +10,7 @@
 
 import { builtinModules } from "module";
 
-<<<<<<< HEAD
 export type ExtensionEcosystem = "npm" | "pypi" | "cargo" | "go";
-=======
-export type ExtensionEcosystem = "npm" | "pypi";
->>>>>>> origin/main
 
 export interface DetectedImport {
   ecosystem: ExtensionEcosystem;
@@ -35,11 +31,8 @@ const JS_LANGUAGES = new Set(["javascript", "typescript", "javascriptreact", "ty
 export function ecosystemForLanguage(languageId: string): ExtensionEcosystem | null {
   if (JS_LANGUAGES.has(languageId)) return "npm";
   if (languageId === "python") return "pypi";
-<<<<<<< HEAD
   if (languageId === "rust") return "cargo";
   if (languageId === "go") return "go";
-=======
->>>>>>> origin/main
   return null;
 }
 
@@ -151,16 +144,15 @@ function parsePythonLine(content: string, lineIdx: number, out: DetectedImport[]
   }
 }
 
-<<<<<<< HEAD
 function parseCargoLine(content: string, lineIdx: number, out: DetectedImport[], seen: Set<string>): void {
-  const match = /^\\s*(?:use|extern\\s+crate)\\s+([a-zA-Z][a-zA-Z0-9_-]*)/.exec(content);
+  const match = /^\s*(?:use|extern\s+crate)\s+([a-zA-Z][a-zA-Z0-9_-]*)/.exec(content);
   if (!match || ["std", "core", "alloc", "crate", "self", "super"].includes(match[1])) return;
   const start = content.indexOf(match[1]);
   pushUnique(out, seen, { ecosystem: "cargo", packageName: match[1].replace(/_/g, "-"), line: lineIdx, startCol: start, endCol: start + match[1].length });
 }
 
 function parseGoLine(content: string, lineIdx: number, out: DetectedImport[], seen: Set<string>): void {
-  if (!/^\\s*import\\b/.test(content)) return;
+  if (!/^\s*import\b/.test(content)) return;
   for (const match of content.matchAll(/"([^"]+)"/g)) {
     const path = match[1];
     if (!path.includes(".") && !path.includes("/")) continue;
@@ -169,20 +161,14 @@ function parseGoLine(content: string, lineIdx: number, out: DetectedImport[], se
   }
 }
 
-=======
->>>>>>> origin/main
 export function parseImports(text: string, ecosystem: ExtensionEcosystem): DetectedImport[] {
   const out: DetectedImport[] = [];
   const seen = new Set<string>();
   text.split(/\r?\n/).forEach((content, lineIdx) => {
     if (ecosystem === "npm") parseNpmLine(content, lineIdx, out, seen);
-<<<<<<< HEAD
     else if (ecosystem === "pypi") parsePythonLine(content, lineIdx, out, seen);
     else if (ecosystem === "cargo") parseCargoLine(content, lineIdx, out, seen);
     else parseGoLine(content, lineIdx, out, seen);
-=======
-    else parsePythonLine(content, lineIdx, out, seen);
->>>>>>> origin/main
   });
   return out;
 }

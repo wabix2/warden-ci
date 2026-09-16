@@ -90,16 +90,12 @@ async function authorizeRunAccessWithDependencies(req, runId, dependencies) {
 function authorizeRunAccess(req, runId) {
     return authorizeRunAccessWithDependencies(req, runId, {
         database: db_1.db,
-<<<<<<< HEAD
         sessionToken: async (sessionId) => {
             const session = await (0, redis_1.getRedisClient)().get(`warden:oauth:session:${sessionId}`);
             if (!session?.accessToken || !session.expiresAt || session.expiresAt <= Date.now())
                 return null;
             return session.accessToken;
         },
-=======
-        sessionToken: (sessionId) => (0, redis_1.getRedisClient)().get(`warden:oauth:session:${sessionId}`),
->>>>>>> origin/main
         githubFetch: fetch,
     });
 }

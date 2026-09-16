@@ -67,15 +67,10 @@ const diagnostics = vscode.languages.createDiagnosticCollection("warden-check");
 const timers = new Map();
 // Cache verdicts for the session so re-scans on every keystroke don't re-hit the
 // backend for packages we already know about.
-<<<<<<< HEAD
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const verdictCache = new Map();
 const flaggedByDoc = new Map();
 const scanGeneration = new Map();
-=======
-const verdictCache = new Map();
-const flaggedByDoc = new Map();
->>>>>>> origin/main
 let isPro = false;
 let statusBarItem;
 function serverUrl() {
@@ -88,7 +83,6 @@ function extensionEnabled() {
 async function checkWithCache(ecosystem, name) {
     const key = `${ecosystem}:${name}`;
     const cached = verdictCache.get(key);
-<<<<<<< HEAD
     if (cached && cached.expiresAt > Date.now())
         return cached.result;
     if (cached)
@@ -96,13 +90,6 @@ async function checkWithCache(ecosystem, name) {
     try {
         const result = await (0, client_1.checkPackage)(serverUrl(), ecosystem, name);
         verdictCache.set(key, { result, expiresAt: Date.now() + CACHE_TTL_MS });
-=======
-    if (cached)
-        return cached;
-    try {
-        const result = await (0, client_1.checkPackage)(serverUrl(), ecosystem, name);
-        verdictCache.set(key, result);
->>>>>>> origin/main
         return result;
     }
     catch (error) {
@@ -112,12 +99,9 @@ async function checkWithCache(ecosystem, name) {
     }
 }
 async function scanDocument(doc) {
-<<<<<<< HEAD
     const documentKey = doc.uri.toString();
     const generation = (scanGeneration.get(documentKey) ?? 0) + 1;
     scanGeneration.set(documentKey, generation);
-=======
->>>>>>> origin/main
     const ecosystem = (0, detection_1.ecosystemForLanguage)(doc.languageId);
     if (!ecosystem || !extensionEnabled()) {
         diagnostics.delete(doc.uri);
@@ -128,11 +112,8 @@ async function scanDocument(doc) {
     const uniqueNames = [...new Set(imports.map((i) => i.packageName))];
     const results = new Map();
     await Promise.all(uniqueNames.map(async (name) => results.set(name, await checkWithCache(ecosystem, name))));
-<<<<<<< HEAD
     if (scanGeneration.get(documentKey) !== generation)
         return;
-=======
->>>>>>> origin/main
     const issues = [];
     const flagged = [];
     for (const imp of imports) {
@@ -272,16 +253,10 @@ function activate(context) {
     }), vscode.commands.registerCommand("wardenCheck.signIn", () => signIn(context)), vscode.commands.registerCommand("wardenCheck.signOut", () => signOut(context)), vscode.commands.registerCommand("wardenCheck.managePlan", () => vscode.env.openExternal(vscode.Uri.parse(`${serverUrl().replace(/\/+$/, "")}/subscribe?plan=pro`))), vscode.commands.registerCommand("wardenCheck.openDashboard", () => vscode.env.openExternal(vscode.Uri.parse(`${serverUrl().replace(/\/+$/, "")}/dashboard`))), vscode.commands.registerCommand("wardenCheck.copyRemediation", async (remediation) => {
         await vscode.env.clipboard.writeText(remediation || "Verify the package before installing.");
         vscode.window.showInformationMessage("Warden remediation guidance copied to clipboard.");
-<<<<<<< HEAD
     }), vscode.languages.registerCodeActionsProvider([{ language: "javascript" }, { language: "typescript" }, { language: "javascriptreact" }, { language: "typescriptreact" }, { language: "python" }, { language: "rust" }, { language: "go" }], new WardenCodeActionProvider(), { providedCodeActionKinds: WardenCodeActionProvider.providedKinds }), vscode.workspace.onDidOpenTextDocument(scanDocument), vscode.workspace.onDidSaveTextDocument(scanDocument), vscode.workspace.onDidChangeTextDocument((e) => scheduleDocumentScan(e.document)), vscode.workspace.onDidCloseTextDocument((doc) => {
         diagnostics.delete(doc.uri);
         flaggedByDoc.delete(doc.uri.toString());
         scanGeneration.delete(doc.uri.toString());
-=======
-    }), vscode.languages.registerCodeActionsProvider([{ language: "javascript" }, { language: "typescript" }, { language: "javascriptreact" }, { language: "typescriptreact" }, { language: "python" }], new WardenCodeActionProvider(), { providedCodeActionKinds: WardenCodeActionProvider.providedKinds }), vscode.workspace.onDidOpenTextDocument(scanDocument), vscode.workspace.onDidSaveTextDocument(scanDocument), vscode.workspace.onDidChangeTextDocument((e) => scheduleDocumentScan(e.document)), vscode.workspace.onDidCloseTextDocument((doc) => {
-        diagnostics.delete(doc.uri);
-        flaggedByDoc.delete(doc.uri.toString());
->>>>>>> origin/main
     }));
 }
 function deactivate() {

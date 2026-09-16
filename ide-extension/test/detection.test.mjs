@@ -5,6 +5,8 @@ import { parseImports, npmPackageFromSpecifier, ecosystemForLanguage } from "../
 test("ecosystemForLanguage maps editor language ids", () => {
   assert.equal(ecosystemForLanguage("typescriptreact"), "npm");
   assert.equal(ecosystemForLanguage("python"), "pypi");
+  assert.equal(ecosystemForLanguage("rust"), "cargo");
+  assert.equal(ecosystemForLanguage("go"), "go");
   assert.equal(ecosystemForLanguage("plaintext"), null);
 });
 
@@ -57,4 +59,14 @@ test("parseImports (pypi) handles import forms, aliases, multi-imports and mappi
 test("parseImports dedupes the same package on the same line", () => {
   const found = parseImports("import a from 'lodash'; const b = require('lodash')", "npm");
   assert.equal(found.filter((f) => f.packageName === "lodash").length, 1);
+});
+
+test("parseImports (cargo) extracts external crates and skips std", () => {
+  const found = parseImports("use serde::Deserialize;\nuse std::collections::HashMap;\nextern crate tokio;", "cargo");
+  assert.deepEqual(found.map((item) => item.packageName), ["serde", "tokio"]);
+});
+
+test("parseImports (go) extracts module roots from import declarations", () => {
+  const found = parseImports('import "github.com/acme/security-kit/v2"', "go");
+  assert.deepEqual(found.map((item) => item.packageName), ["github.com/acme/security-kit"]);
 });

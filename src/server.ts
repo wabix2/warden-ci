@@ -9,13 +9,9 @@ import { defaultScanPolicy, evaluatePolicy, toCycloneDx, toSarif, redact } from 
 import { assessPackage } from "./scan/riskSignals";
 import { queryMalwareAdvisories, osvEcosystemFor } from "./scan/advisories";
 import { npmEcosystem } from "./scan/ecosystems/npm";
-<<<<<<< HEAD
   import { pypiEcosystem } from "./scan/ecosystems/pypi";
   import { cargoEcosystem } from "./scan/ecosystems/cargo";
   import { goEcosystem } from "./scan/ecosystems/go";
-=======
-import { pypiEcosystem } from "./scan/ecosystems/pypi";
->>>>>>> origin/main
 import type { Ecosystem } from "./scan/ecosystems/types";
 import { db } from "./db";
 import { repositories, scanRuns, findings, auditEvents, installations, remediations, policies, policyVersions, suppressions } from "./db/schema";
@@ -37,7 +33,6 @@ import { buildSafeDraft, parseOptInAudience } from "./outreach/audience";
 
 import { CANONICAL_BASE_URL } from "./lib/publicUrl";
 
-<<<<<<< HEAD
   const app = express();
   app.disable("x-powered-by");
   app.use((_req, res, next) => {
@@ -48,10 +43,6 @@ import { CANONICAL_BASE_URL } from "./lib/publicUrl";
     next();
   });
   const PORT = Number(process.env.PORT || 3000);
-=======
-const app = express();
-const PORT = Number(process.env.PORT || 3000);
->>>>>>> origin/main
 const OAUTH_STATE_COOKIE = "warden_oauth_state";
 // Marks a GitHub OAuth flow that was started by an editor/CLI client rather than a
 // browser session. When present on the callback, the established session id is parked
@@ -669,11 +660,7 @@ app.get("/api/billing/status", async (req: Request, res: Response) => {
 // this deploys, with no extension update required.
 // ---------------------------------------------------------------------------
 
-<<<<<<< HEAD
   const CLI_ECOSYSTEMS: Record<string, Ecosystem> = { npm: npmEcosystem, pypi: pypiEcosystem, cargo: cargoEcosystem, go: goEcosystem };
-=======
-const CLI_ECOSYSTEMS: Record<string, Ecosystem> = { npm: npmEcosystem, pypi: pypiEcosystem };
->>>>>>> origin/main
 
 // Turns an assessPackage verdict into the same wording the PR scanner uses, so the
 // extension can render a finding without duplicating message/remediation copy.
@@ -697,11 +684,7 @@ app.get("/api/check/package", async (req: Request, res: Response) => {
   const ecosystemId = String(req.query.ecosystem || "").toLowerCase();
   const name = String(req.query.name || "").trim();
   const ecosystem = CLI_ECOSYSTEMS[ecosystemId];
-<<<<<<< HEAD
   if (!ecosystem) return res.status(400).json({ ok: false, error: "ecosystem must be one of: npm, pypi, cargo, go" });
-=======
-  if (!ecosystem) return res.status(400).json({ ok: false, error: "ecosystem must be one of: npm, pypi" });
->>>>>>> origin/main
   if (!name || name.length > 214 || !/^[@a-z0-9._/-]+$/i.test(name)) return res.status(400).json({ ok: false, error: "A valid package name is required" });
   try {
     // Threat-intel first: a confirmed malicious-package advisory is the strongest

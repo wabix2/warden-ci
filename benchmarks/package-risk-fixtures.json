@@ -1,0 +1,8 @@
+[
+  {"id":"popular-valid","ecosystem":"npm","packageName":"react","expected":"safe"},
+  {"id":"nonexistent","ecosystem":"npm","packageName":"warden-ai-generated-package-does-not-exist","expected":"hallucinated"},
+  {"id":"fresh-typosquat","ecosystem":"npm","packageName":"recat","expected":"typosquat-suspect"},
+  {"id":"high-version-confusion","ecosystem":"npm","packageName":"internal-utils","expected":"dependency-confusion-suspect"},
+  {"id":"recent-takeover","ecosystem":"npm","packageName":"express","expected":"maintainer-takeover-suspect"},
+  {"id":"unknown-registry","ecosystem":"npm","packageName":"registry-timeout","expected":"unknown"}
+]
