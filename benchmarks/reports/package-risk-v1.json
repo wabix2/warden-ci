@@ -46,8 +46,8 @@
     "registryUnavailableRate": 0.2,
     "latencyMs": {
       "p50": 0.013,
-      "p95": 0.195,
-      "p99": 0.195
+      "p95": 0.209,
+      "p99": 0.209
     }
   },
   "byCategory": {
@@ -92,7 +92,7 @@
       "unknown": 2
     }
   },
-  "elapsedMs": 0.807,
+  "elapsedMs": 0.868,
   "results": [
     {
       "id": "safe-popular",
@@ -105,7 +105,7 @@
         "latestVersion": "18.3.1"
       },
       "actual": "safe",
-      "latencyMs": 0.195,
+      "latencyMs": 0.209,
       "pass": true
     },
     {
@@ -119,7 +119,7 @@
         "latestVersion": "1.2.0"
       },
       "actual": "safe",
-      "latencyMs": 0.034,
+      "latencyMs": 0.047,
       "pass": true
     },
     {
@@ -134,7 +134,7 @@
         "latestVersion": "0.4.0"
       },
       "actual": "safe",
-      "latencyMs": 0.008,
+      "latencyMs": 0.01,
       "pass": true
     },
     {
@@ -147,7 +147,7 @@
         "lookupStatus": "not_found"
       },
       "actual": "hallucinated",
-      "latencyMs": 0.013,
+      "latencyMs": 0.014,
       "pass": true
     },
     {
@@ -174,7 +174,7 @@
         "publishedDaysAgo": 5
       },
       "actual": "typosquat-suspect",
-      "latencyMs": 0.148,
+      "latencyMs": 0.158,
       "pass": true
     },
     {
