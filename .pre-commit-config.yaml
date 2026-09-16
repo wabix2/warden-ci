@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: warden-security-gate
+        name: Warden security gate
+        entry: bash -c 'tmp=$(mktemp); git diff --cached --unified=0 > "$tmp"; node scripts/warden-scan.mjs "$tmp"; status=$?; rm -f "$tmp"; exit $status'
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]

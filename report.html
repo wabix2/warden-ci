@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security report — Warden CI</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #090d12; color: #e5e7eb; margin: 0; padding: 32px; }
+  main { max-width: 960px; margin: auto; }
+  header { border-bottom: 1px solid #263241; padding-bottom: 24px; margin-bottom: 24px; }
+  h1 { font-size: 28px; margin: 0 0 6px; }
+  h2 { font-size: 18px; margin: 28px 0 10px; }
+  .muted { color: #94a3b8; }
+  .error { padding: 16px; border: 1px solid #7f1d1d; border-radius: 8px; background: #2a1115; color: #fecaca; }
+  .meta, .finding { border: 1px solid #263241; border-radius: 8px; padding: 16px; margin-top: 12px; background: #111821; }
+  .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
+  .label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: .04em; }
+  .verdict { font-weight: 700; }
+  .verdict.success { color: #86efac; }
+  .verdict.failure { color: #fca5a5; }
+  .verdict.incomplete { color: #fcd34d; }
+  .finding h3 { margin: 6px 0; font-size: 16px; }
+  .finding pre { white-space: pre-wrap; font: inherit; }
+  .severity { font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; display: inline-block; padding: 3px 8px; border-radius: 999px; margin-bottom: 8px; }
+  .severity.critical, .severity.high, .severity.failure { color: #fca5a5; background: #2a1115; }
+  .severity.medium, .severity.warning { color: #fcd34d; background: #2a2211; }
+  .severity.low { color: #93c5fd; background: #101a2a; }
+  .finding-path { font-family: ui-monospace, monospace; font-size: 13px; }
+  .fix-row { margin-top: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .fix-btn { padding: 8px 12px; background: #2563eb; color: #fff; border: 0; border-radius: 6px; cursor: pointer; font-size: 14px; }
+  .fix-btn:disabled { opacity: .6; cursor: default; }
+  .fix-status { font-size: 13px; }
+  .fix-status a { color: #86efac; }
+  .fix-status.upgrade { color: #fcd34d; }
+  .fix-status.upgrade a { color: #fcd34d; text-decoration: underline; }
+  .fix-status.err { color: #fca5a5; }
+  .customer-links { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+  .customer-links a { display: inline-flex; padding: 9px 12px; border: 1px solid #2dd4bf; border-radius: 7px; color: #99f6e4; text-decoration: none; }
+  .customer-links a:last-child { border-color: #f59e0b; color: #fcd34d; }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
+  .export-btn { padding: 8px 12px; background: #111821; color: #e5e7eb; border: 1px solid #2dd4bf; border-radius: 7px; cursor: pointer; font: inherit; font-size: 14px; }
+  .export-btn:hover { background: #12262c; }
+  .export-btn:disabled { opacity: .6; cursor: default; }
+  .summary { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+  .summary-chip { font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 999px; border: 1px solid #263241; background: #111821; color: #e5e7eb; text-transform: uppercase; letter-spacing: .04em; }
+  .summary-chip.total { border-color: #2dd4bf; color: #99f6e4; }
+  .summary-chip.failure, .summary-chip.critical, .summary-chip.high { color: #fca5a5; border-color: #7f1d1d; }
+  .summary-chip.warning, .summary-chip.medium { color: #fcd34d; border-color: #92400e; }
+  .summary-chip.low { color: #93c5fd; border-color: #1e3a5f; }
+  .filters { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; align-items: center; }
+  .filters label { display: flex; align-items: center; gap: 8px; color: #94a3b8; font-size: 13px; }
+  .filters select { background: #111821; color: #e5e7eb; border: 1px solid #263241; border-radius: 6px; padding: 6px 8px; font: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="muted">Warden security gate / Customer report</p>
+    <h1 id="title">Loading report…</h1>
+    <p id="subtitle" class="muted"></p>
+    <nav class="customer-links" aria-label="Report actions">
+      <a href="/dashboard">Open dashboard</a>
+      <a href="/policy">Edit policy</a>
+      <a href="/subscribe?plan=pro">Upgrade to Pro</a>
+    </nav>
+  </header>
+  <section id="content" class="muted">Verifying your GitHub session and loading the authorized report.</section>
+</main>
+<script>
+const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;",
+}[char]));
+
+const runId = new URLSearchParams(location.search).get("runId");
+const content = document.getElementById("content");
+const titleEl = document.getElementById("title");
+const subtitleEl = document.getElementById("subtitle");
+
+function findingCard(f) {
+  const canFix = Boolean(f.packageName && f.ecosystem && f.currentVersion && f.manifestPath);
+  const location = f.filePath
+    ? `<p class="finding-path muted">${escapeHtml(f.filePath)}${f.lineNumber ? `:${escapeHtml(f.lineNumber)}` : ""}</p>`
+    : "";
+  const fixSection = canFix
+    ? `<div class="fix-row">
+         <button class="fix-btn" data-fix="${escapeHtml(f.id)}">Start verified fix workflow</button>
+         <span class="fix-status" data-fix-status="${escapeHtml(f.id)}"></span>
+       </div>`
+    : `<p class="muted">Remediation unavailable: required advisory or manifest metadata is missing for this finding.</p>`;
+  return `<article class="finding">
+    <span class="severity ${escapeHtml(f.severity)}">${escapeHtml(f.severity)}</span>
+    <h3>${escapeHtml(f.title)}</h3>
+    <p>${escapeHtml(f.message)}</p>
+    ${location}
+    <p><strong>Recommended remediation:</strong> ${escapeHtml(f.remediation || "Unavailable")}</p>
+    <p class="muted">Status: ${escapeHtml(f.status)}</p>
+    ${fixSection}
+  </article>`;
+}
+
+let currentRun = null;
+
+// SARIF / CycloneDX exports are served by /api/runs/:runId?format=... for the
+// authorized run. Fetch as a blob so an auth error surfaces inline instead of
+// navigating away from the report.
+async function downloadExport(format, button) {
+  if (!currentRun) return;
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "Preparing…";
+  try {
+    const response = await fetch(`/api/runs/${encodeURIComponent(currentRun.id)}?format=${encodeURIComponent(format)}`, { credentials: "same-origin" });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `Export failed (${response.status})`);
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = `warden-run-${currentRun.id}.${format === "sarif" ? "sarif" : "cyclonedx"}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+// Client-side severity/category filtering over the already-fetched findings — no
+// extra endpoint needed.
+function renderFindings() {
+  const severity = document.getElementById("filter-severity").value;
+  const category = document.getElementById("filter-category").value;
+  const filtered = currentRun.findings.filter((f) =>
+    (severity === "all" || f.severity === severity) &&
+    (category === "all" || f.category === category)
+  );
+  const list = document.getElementById("findings-list");
+  list.innerHTML = filtered.length
+    ? filtered.map(findingCard).join("")
+    : "<p class='muted'>No findings match the current filters.</p>";
+  wireFixButtons(currentRun);
+}
+
+function wireFixButtons(run) {
+  document.querySelectorAll("[data-fix]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.getAttribute("data-fix");
+      const status = document.querySelector(`[data-fix-status="${id}"]`);
+      button.disabled = true;
+      status?.classList.remove("upgrade", "err");
+      if (status) status.textContent = "Creating remediation PR…";
+      try {
+        const response = await fetch(`/api/runs/${encodeURIComponent(run.id)}/findings/${encodeURIComponent(id)}/fix`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+        });
+        const body = await response.json().catch(() => ({}));
+        if (response.status === 402 || body.status === "upgrade_required") {
+          if (status) {
+            status.classList.add("upgrade");
+            status.innerHTML = `${escapeHtml(body.error || "Upgrade required")} — <a href="${escapeHtml(body.upgradeUrl || "/subscribe?plan=pro")}">Upgrade to Pro</a>`;
+          }
+          button.disabled = false;
+          return;
+        }
+        if (!response.ok) throw new Error(body.error || "Remediation unavailable");
+        if (status) {
+          status.innerHTML = body.pullRequestUrl
+            ? `${escapeHtml(body.status)} — <a href="${escapeHtml(body.pullRequestUrl)}" target="_blank" rel="noreferrer">Open remediation PR</a>`
+            : escapeHtml(body.status);
+        }
+      } catch (error) {
+        if (status) {
+          status.classList.add("err");
+          status.textContent = error.message;
+        }
+        button.disabled = false;
+      }
+    });
+  });
+}
+
+fetch(`/api/runs/${encodeURIComponent(runId || "")}`, { credentials: "same-origin" })
+  .then(async (response) => {
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || "Could not load report");
+    return body.run;
+  })
+  .then((run) => {
+    currentRun = run;
+    titleEl.textContent = `Run ${run.id}`;
+    subtitleEl.textContent = run.repository
+      ? `${run.repository}${run.pullRequestNumber ? ` · pull request #${run.pullRequestNumber}` : ""}`
+      : "Repository context unavailable";
+
+    const findings = Array.isArray(run.findings) ? run.findings : [];
+    // Summary strip: total plus a chip per severity present, worst first.
+    const severityOrder = ["failure", "warning"];
+    const severityCounts = findings.reduce((acc, f) => {
+      acc[f.severity] = (acc[f.severity] || 0) + 1;
+      return acc;
+    }, {});
+    const summaryChips = [`<span class="summary-chip total">${findings.length} total</span>`]
+      .concat(severityOrder
+        .filter((severity) => severityCounts[severity])
+        .map((severity) => `<span class="summary-chip ${escapeHtml(severity)}">${severityCounts[severity]} ${escapeHtml(severity)}</span>`))
+      .join("");
+
+    // Category filter options come from the categories actually present in this run.
+    const categories = [...new Set(findings.map((f) => f.category).filter(Boolean))].sort();
+    const categoryOptions = ["<option value=\"all\">All categories</option>"]
+      .concat(categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`))
+      .join("");
+
+    content.innerHTML = `
+      <div class="meta">
+        <div><div class="label">Scanned</div><div>${escapeHtml(run.scanTimestamp || "Unavailable")}</div></div>
+        <div><div class="label">Findings</div><div>${escapeHtml(run.findingsCount)}</div></div>
+        <div><div class="label">Verdict</div><div class="verdict ${escapeHtml(run.verdict || "")}">${escapeHtml(run.verdict || "Unavailable")}</div></div>
+        <div><div class="label">Validation</div><div>${escapeHtml(run.status)}</div></div>
+      </div>
+      <div class="filters" role="group" aria-label="Report exports">
+        <button type="button" class="export-btn" id="export-sarif">Export SARIF</button>
+        <button type="button" class="export-btn" id="export-cyclonedx">Export CycloneDX SBOM</button>
+      </div>
+      <h2>Findings</h2>
+      <div class="summary" id="summary-strip">${summaryChips}</div>
+      <div class="filters">
+        <label>Severity
+          <select id="filter-severity">
+            <option value="all">All severities</option>
+            <option value="failure">Failure</option>
+            <option value="warning">Warning</option>
+          </select>
+        </label>
+        <label>Category
+          <select id="filter-category">${categoryOptions}</select>
+        </label>
+      </div>
+      <div id="findings-list"></div>
+    `;
+
+    document.getElementById("export-sarif").addEventListener("click", (event) => downloadExport("sarif", event.currentTarget));
+    document.getElementById("export-cyclonedx").addEventListener("click", (event) => downloadExport("cyclonedx", event.currentTarget));
+    document.getElementById("filter-severity").addEventListener("change", renderFindings);
+    document.getElementById("filter-category").addEventListener("change", renderFindings);
+
+    renderFindings();
+  })
+  .catch((error) => {
+    titleEl.textContent = "Report unavailable";
+    content.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+  });
+</script>
+</body>
+</html>

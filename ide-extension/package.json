@@ -1,0 +1,89 @@
+{
+  "name": "warden-check",
+  "displayName": "Warden Check",
+  "description": "Flags hallucinated, typosquat, and suspicious npm, PyPI, crates.io, and Go dependencies as you write code.",
+  "version": "0.2.0",
+  "publisher": "warden-ci",
+  "icon": "icon.png",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wabix2/warden-ci.git",
+    "directory": "ide-extension"
+  },
+  "homepage": "https://warden-ci-dvk5.onrender.com",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters"
+  ],
+  "keywords": [
+    "security",
+    "supply chain",
+    "typosquat",
+    "hallucinated packages",
+    "npm",
+    "pypi",
+    "crates.io",
+    "go modules"
+  ],
+  "activationEvents": [
+    "onLanguage:javascript",
+    "onLanguage:typescript",
+    "onLanguage:javascriptreact",
+    "onLanguage:typescriptreact",
+    "onLanguage:python",
+    "onLanguage:rust",
+    "onLanguage:go"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "wardenCheck.scanActiveFile",
+        "title": "Warden: Scan Active File"
+      },
+      {
+        "command": "wardenCheck.signIn",
+        "title": "Warden: Sign in"
+      },
+      {
+        "command": "wardenCheck.signOut",
+        "title": "Warden: Sign out"
+      },
+      {
+        "command": "wardenCheck.managePlan",
+        "title": "Warden: Manage plan"
+      }
+    ],
+    "configuration": {
+      "title": "Warden Check",
+      "properties": {
+        "wardenCheck.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Scan supported files for suspicious package imports."
+        },
+        "wardenCheck.serverUrl": {
+          "type": "string",
+          "default": "https://warden-ci-dvk5.onrender.com",
+          "description": "Base URL of the Warden backend used for package checks, sign-in, and plan status."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p .",
+    "watch": "tsc -w -p .",
+    "test": "tsc -p . && node --test test/*.test.mjs",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/vscode": "^1.137.0",
+    "@vscode/vsce": "^3.2.1",
+    "typescript": "^5.7.3"
+  }
+}

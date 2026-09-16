@@ -1,33 +1,42 @@
 {
-  "name": "my-project",
-  "version": "0.1.0",
-  "private": true,
-  "packageManager": "pnpm@12.3.4",
+  "name": "warden-ci",
+  "version": "1.0.0",
+  "main": "dist/server.js",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test:webhook": "node scripts/test-webhook.mjs",
+    "test:run-authorization": "pnpm build && node --test scripts/test-run-authorization.mjs",
+    "test:popular": "pnpm build && node --test scripts/test-popular-packages.mjs",
+    "test:package-risk": "pnpm build && node --test scripts/test-package-risk-signals.mjs",
+    "test:advisories": "pnpm build && node --test scripts/test-advisories.mjs",
+    "test:corpus-privacy": "pnpm build && node --test scripts/test-corpus-privacy.mjs",
+    "warden-scan": "node scripts/warden-scan.mjs",
+    "db:ownership:report": "node scripts/backfill-run-ownership.mjs",
+    "db:ownership:apply": "node scripts/backfill-run-ownership.mjs --apply",
+    "test:ownership-backfill": "node --test scripts/test-ownership-backfill.mjs",
+    "test:remediation": "pnpm build && node --test scripts/test-remediation-engine.mjs scripts/test-remediation-authorization.mjs scripts/test-osv-remediation.mjs scripts/test-remediation-github.mjs",
+    "test:billing": "pnpm build && node --test scripts/test-billing-store.mjs",
+    "test:outreach": "pnpm build && node --test scripts/test-outreach-audience.mjs",
+    "test:customer-links": "node --test scripts/test-customer-links.mjs",
+    "test:policy": "pnpm build && node --test scripts/test-policy-engine.mjs",
+    "smoke:render": "node scripts/smoke-render.mjs"
   },
   "dependencies": {
-    "@base-ui/react": "^1.5.0",
-    "@vercel/analytics": "1.6.1",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "lucide-react": "^1.16.0",
-    "next": "16.3.3",
-    "react": "^19",
-    "react-dom": "^19",
-    "shadcn": "^4.11.0",
-    "tailwind-merge": "^3.3.1",
-    "tw-animate-css": "^1.4.0"
+    "@octokit/auth-app": "^7.2.2",
+    "@octokit/rest": "^20.1.2",
+    "@upstash/redis": "^1.38.4",
+    "@vercel/connect": "^2.0.4",
+    "drizzle-orm": "^0.45.2",
+    "express": "^4.22.2",
+    "pg": "^8.23.0",
+    "semver": "^7.8.5"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.3.3",
-    "@types/node": "^24",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "postcss": "^8.5",
-    "tailwindcss": "^4.3.3",
-    "typescript": "5.7.3"
+    "@types/express": "^4.17.25",
+    "@types/node": "^20.19.43",
+    "@types/pg": "^8.23.1",
+    "@types/semver": "^7.8.0",
+    "typescript": "^5.7.3"
   }
 }

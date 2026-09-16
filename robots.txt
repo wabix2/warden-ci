@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://warden-ci-dvk5.onrender.com/sitemap.xml

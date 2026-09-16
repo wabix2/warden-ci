@@ -1,0 +1,22 @@
+{
+  "$schema": "https://warden-ci.dev/schemas/policy.schema.json",
+  "schema": "v1",
+  "revision": 1,
+  "mode": "report",
+  "minimumSeverity": "failure",
+  "failOnIncomplete": false,
+  "blockCategories": ["secret", "execution", "dependency"],
+  "ignoredPaths": ["**/fixtures/**", "**/vendor/**"],
+  "ignoredPackages": [],
+  "requireCleanBaseline": false,
+  "suppressions": [
+    {
+      "id": "example-temporary-suppression",
+      "fingerprint": "secret:path:line:reason",
+      "reason": "Tracked remediation issue WARDEN-000",
+      "owner": "security@example.com",
+      "expiresAt": "2027-01-31T00:00:00.000Z",
+      "approvedBy": "security@example.com"
+    }
+  ]
+}
