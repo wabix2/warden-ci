@@ -10,9 +10,14 @@ export type RunAccessResult =
   | { kind: "forbidden" }
   | { kind: "authorized"; run: typeof scanRuns.$inferSelect; installationId: number };
 
+type OAuthSessionRecord = { accessToken?: string; login?: string; expiresAt?: number };
+
 export async function sessionTokenFromRequest(req: Request): Promise<string | null> {
   const sessionId = sessionIdFromRequest(req);
-  return sessionId ? getRedisClient().get<string>(`warden:oauth:session:${sessionId}`) : null;
+  if (!sessionId || !/^[A-Za-z0-9_-]{32,256}$/.test(sessionId)) return null;
+  const session = await getRedisClient().get<OAuthSessionRecord>(`warden:oauth:session:${sessionId}`);
+  if (!session || typeof session !== "object" || typeof session.accessToken !== "string" || !session.accessToken || typeof session.expiresAt !== "number" || session.expiresAt <= Date.now()) return null;
+  return session.accessToken;
 }
 
 function sessionIdFromRequest(req: Request): string | undefined {

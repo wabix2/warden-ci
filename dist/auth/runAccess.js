@@ -13,7 +13,12 @@ const schema_1 = require("../db/schema");
 const redis_1 = require("../lib/redis");
 async function sessionTokenFromRequest(req) {
     const sessionId = sessionIdFromRequest(req);
-    return sessionId ? (0, redis_1.getRedisClient)().get(`warden:oauth:session:${sessionId}`) : null;
+    if (!sessionId || !/^[A-Za-z0-9_-]{32,256}$/.test(sessionId))
+        return null;
+    const session = await (0, redis_1.getRedisClient)().get(`warden:oauth:session:${sessionId}`);
+    if (!session || typeof session !== "object" || typeof session.accessToken !== "string" || !session.accessToken || typeof session.expiresAt !== "number" || session.expiresAt <= Date.now())
+        return null;
+    return session.accessToken;
 }
 function sessionIdFromRequest(req) {
     const cookie = req.headers.cookie ?? "";

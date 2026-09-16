@@ -1,7 +1,7 @@
 {
   "name": "warden-check",
   "displayName": "Warden Check",
-  "description": "Flags hallucinated, typosquat, and suspicious npm, PyPI, crates.io, and Go dependencies as you write code.",
+  "description": "Flags nonexistent, typosquat, and suspicious npm, PyPI, crates.io, and Go dependencies as you write code.",
   "version": "0.2.0",
   "publisher": "warden-ci",
   "icon": "icon.png",
@@ -13,7 +13,7 @@
   },
   "homepage": "https://warden-ci-dvk5.onrender.com",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": ">=1.137.0"
   },
   "categories": [
     "Linters"
