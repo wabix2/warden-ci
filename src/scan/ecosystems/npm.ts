@@ -2,6 +2,7 @@ import { builtinModules } from "module";
 import { AddedLine } from "../diff";
 import { Ecosystem, PackageMetadata } from "./types";
 import { POPULAR_NPM_PACKAGES } from "../popularPackages";
+import { cachedMetadata, metadataFromResponse, unavailableMetadata } from "./registry";
 
 const IMPORT_PATTERNS = [
   /\bfrom\s+['"]([^'"]+)['"]/g,
@@ -40,7 +41,7 @@ function extractPackages(addedLines: AddedLine[]): Map<string, number[]> {
   return linesByPackage;
 }
 
-async function fetchMetadata(packageName: string): Promise<PackageMetadata> {
+async function fetchMetadataUncached(packageName: string): Promise<PackageMetadata> {
   const encoded = packageName.startsWith("@")
     ? `@${encodeURIComponent(packageName.slice(1))}`
     : encodeURIComponent(packageName);
@@ -51,7 +52,7 @@ async function fetchMetadata(packageName: string): Promise<PackageMetadata> {
       // 404 = genuinely doesn't exist. Any other non-OK status is treated as
       // "exists" (fail open) since we can't distinguish a real 404 from a
       // registry hiccup any other way with this endpoint.
-      return { existsOnRegistry: false, lookupStatus: res.status === 404 ? "not_found" : "unavailable" };
+      return metadataFromResponse(res.status)!;
     }
     const data = (await res.json()) as {
       time?: Record<string, string>;
@@ -74,6 +75,8 @@ async function fetchMetadata(packageName: string): Promise<PackageMetadata> {
     return { existsOnRegistry: false, lookupStatus: "unavailable" };
   }
 }
+
+const fetchMetadata = (packageName: string) => cachedMetadata(npmEcosystem, packageName, () => fetchMetadataUncached(packageName));
 
 export const npmEcosystem: Ecosystem = {
   id: "npm",

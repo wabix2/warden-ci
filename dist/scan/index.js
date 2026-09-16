@@ -3,6 +3,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.ECOSYSTEMS = void 0;
+exports.assertUniqueExtensions = assertUniqueExtensions;
 exports.scanFiles = scanFiles;
 const path_1 = __importDefault(require("path"));
 const diff_1 = require("./diff");
@@ -14,14 +16,24 @@ const npm_1 = require("./ecosystems/npm");
 const pypi_1 = require("./ecosystems/pypi");
 const cargo_1 = require("./ecosystems/cargo");
 const go_1 = require("./ecosystems/go");
-const rust_1 = require("./ecosystems/rust");
 const ruby_1 = require("./ecosystems/ruby");
 const policy_1 = require("../enforcement/policy");
 const MAX_ANNOTATIONS = 50; // GitHub Check Run API accepts at most 50 annotations per request
-const ECOSYSTEMS = [npm_1.npmEcosystem, pypi_1.pypiEcosystem, cargo_1.cargoEcosystem, go_1.goEcosystem, rust_1.rustEcosystem, ruby_1.rubyEcosystem];
+exports.ECOSYSTEMS = [npm_1.npmEcosystem, pypi_1.pypiEcosystem, cargo_1.cargoEcosystem, go_1.goEcosystem, ruby_1.rubyEcosystem];
+function assertUniqueExtensions(ecosystems = exports.ECOSYSTEMS) {
+    const owners = new Map();
+    for (const ecosystem of ecosystems)
+        for (const extension of ecosystem.extensions) {
+            const previous = owners.get(extension);
+            if (previous)
+                throw new Error(`Duplicate ecosystem extension ${extension}: ${previous} and ${ecosystem.id}`);
+            owners.set(extension, ecosystem.id);
+        }
+}
+assertUniqueExtensions();
 function ecosystemForFile(filename) {
     const ext = path_1.default.extname(filename).toLowerCase();
-    return ECOSYSTEMS.find((e) => e.extensions.includes(ext));
+    return exports.ECOSYSTEMS.find((e) => e.extensions.includes(ext));
 }
 async function checkPackageRisk(ecosystem, linesByPackage) {
     const annotations = [];

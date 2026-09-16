@@ -9,7 +9,6 @@ import { npmEcosystem } from "./ecosystems/npm";
   import { cargoEcosystem } from "./ecosystems/cargo";
   import { goEcosystem } from "./ecosystems/go";
 import { Ecosystem } from "./ecosystems/types";
-import { rustEcosystem } from "./ecosystems/rust";
 import { rubyEcosystem } from "./ecosystems/ruby";
 import { evaluateGate, type EnforcementPolicy, type PolicyDecision } from "../enforcement/policy";
 
@@ -57,7 +56,17 @@ export interface ScanResult {
 
 const MAX_ANNOTATIONS = 50; // GitHub Check Run API accepts at most 50 annotations per request
 
-  const ECOSYSTEMS: Ecosystem[] = [npmEcosystem, pypiEcosystem, cargoEcosystem, goEcosystem, rustEcosystem, rubyEcosystem];
+export const ECOSYSTEMS: Ecosystem[] = [npmEcosystem, pypiEcosystem, cargoEcosystem, goEcosystem, rubyEcosystem];
+
+export function assertUniqueExtensions(ecosystems: Ecosystem[] = ECOSYSTEMS): void {
+  const owners = new Map<string, string>();
+  for (const ecosystem of ecosystems) for (const extension of ecosystem.extensions) {
+    const previous = owners.get(extension);
+    if (previous) throw new Error(`Duplicate ecosystem extension ${extension}: ${previous} and ${ecosystem.id}`);
+    owners.set(extension, ecosystem.id);
+  }
+}
+assertUniqueExtensions();
 
 function ecosystemForFile(filename: string): Ecosystem | undefined {
   const ext = path.extname(filename).toLowerCase();

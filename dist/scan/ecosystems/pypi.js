@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.pypiEcosystem = void 0;
 const popularPackages_1 = require("../popularPackages");
 const pythonStdlib_1 = require("./pythonStdlib");
+const registry_1 = require("./registry");
 // `import foo`, `import foo.bar`, `from foo import bar`, `from foo.bar import baz`
 const IMPORT_LINE = /^\s*(?:import\s+([a-zA-Z_][a-zA-Z0-9_]*)|from\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\.[a-zA-Z0-9_.]+)?\s+import)/;
 // PyPI project names for a top-level module aren't always identical (e.g. `import yaml`
@@ -35,11 +36,11 @@ function extractPackages(addedLines) {
     }
     return linesByPackage;
 }
-async function fetchMetadata(packageName) {
+async function fetchMetadataUncached(packageName) {
     try {
         const res = await fetch(`https://pypi.org/pypi/${encodeURIComponent(packageName)}/json`);
         if (!res.ok) {
-            return { existsOnRegistry: false, lookupStatus: res.status === 404 ? "not_found" : "unavailable" };
+            return (0, registry_1.metadataFromResponse)(res.status);
         }
         // PyPI JSON exposes release files and upload timestamps, but no per-release
         // uploader identity. Maintainer-takeover detection is therefore npm-only.
@@ -63,6 +64,7 @@ async function fetchMetadata(packageName) {
         return { existsOnRegistry: false, lookupStatus: "unavailable" };
     }
 }
+const fetchMetadata = (packageName) => (0, registry_1.cachedMetadata)(exports.pypiEcosystem, packageName, () => fetchMetadataUncached(packageName));
 exports.pypiEcosystem = {
     id: "pypi",
     label: "PyPI",
