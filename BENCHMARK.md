@@ -1,17 +1,11 @@
-# Warden benchmark
+# Warden benchmark methodology
 
-Warden keeps two benchmark layers:
+Warden keeps three datasets separate:
 
-- `benchmarks/package-risk-fixtures.json` is a small regression suite for deterministic behavior.
-- `benchmarks/evaluation/package-risk-v1.json` is an evaluation corpus. The current corpus is explicitly synthetic local metadata fixtures and must not be presented as real-world accuracy evidence.
+1. **Regression fixtures**: six deterministic cases used to prevent known behavior regressions.
+2. **Synthetic evaluation**: ten recorded-metadata fixtures with explicit labels. The current report is synthetic local evidence, not real-world accuracy.
+3. **External evaluation**: `benchmarks/evaluation/external/` accepts provenance-backed fixtures only. The current external corpus is empty, so external metrics are NOT MEASURED.
 
-Run the evaluation with:
+Reports include corpus version, fixture count, provenance, retrieval date, label methodology, ecosystem/category distributions, exclusions, UNKNOWN and registry-failure rates, TP/TN/FP/FN, precision, recall, F1, specificity, false-positive/negative rates, coverage, and latency percentiles.
 
-```bash
-pnpm build
-node scripts/evaluate-package-risk.mjs
-```
-
-The runner writes `benchmarks/reports/package-risk-v1.json` and reports confusion counts, precision, recall, F1, coverage, UNKNOWN rate, median latency, and category-level results. A positive means a risk verdict; `safe` is the negative class; `registry-unavailable` is measured separately as UNKNOWN and is never treated as safe.
-
-A public real-world benchmark requires a versioned registry snapshot, retrieval dates, labeling rules, ecosystem-specific fixtures, and independent review. Those data are not present in this repository, so no real-world accuracy claim is made.
+UNKNOWN is never collapsed into safe or unsafe. Unresolved external examples must be excluded from accuracy metrics and reported as exclusions. Synthetic results must not be used to claim production accuracy or an SLA.

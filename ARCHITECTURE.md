@@ -40,6 +40,10 @@ Warden governs dependency risk introduced during AI-assisted development. It doe
 
 Risk assessments return a structured verdict with confidence, human-readable reasons, and typed evidence. Registry-unavailable is represented as UNKNOWN and is not treated as safe or malicious. The same scan core is used by server and extension-facing flows.
 
+## Phase 3 evidence boundary
+
+The architecture supports a shared scan/policy/evidence path across server and extension workflows. Package-level identity, registry state, reasons, confidence, and evidence are explicit. Tenant and provider lifecycle controls are tested at helper/harness level but are not claims of deployed isolation or provider verification.
+
 ## Current limitations
 
 The repository contains deterministic local evidence, but deployed two-tenant authorization, production webhook processing/idempotency, provider-backed billing webhooks, and a real-world labeled benchmark corpus still require external infrastructure and credentials.

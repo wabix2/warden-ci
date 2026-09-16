@@ -31,16 +31,39 @@ const fn = results.filter((row) => positiveLabels.has(row.expected) && row.actua
 const tn = results.filter((row) => row.expected === safeLabel && row.actual === safeLabel).length;
 const precision = tp + fp ? tp / (tp + fp) : null;
 const recall = tp + fn ? tp / (tp + fn) : null;
+const specificity = tn + fp ? tn / (tn + fp) : null;
+const falsePositiveRate = tn + fp ? fp / (tn + fp) : null;
+const falseNegativeRate = tp + fn ? fn / (tp + fn) : null;
+const sortedLatencies = results.map((row) => row.latencyMs).sort((a, b) => a - b);
+const percentile = (p) => sortedLatencies.length ? sortedLatencies[Math.min(sortedLatencies.length - 1, Math.ceil(sortedLatencies.length * p) - 1)] : null;
 const report = {
   dataset: dataset.id,
   datasetType: dataset.datasetType,
   evaluationDate: dataset.evaluationDate,
+  provenance: dataset.provenance ?? { source: "synthetic local fixtures", retrievalDate: dataset.evaluationDate, registry: "recorded metadata" },
+  labelMethodology: dataset.labelMethodology ?? "Fixture labels are explicit expected states; unresolved examples must not be included in accuracy metrics.",
+  exclusions: dataset.exclusions ?? [],
+  distributions: {
+    ecosystems: Object.fromEntries([...new Set(results.map((row) => row.ecosystem ?? "npm"))].map((ecosystem) => [ecosystem, results.filter((row) => (row.ecosystem ?? "npm") === ecosystem).length])),
+    categories: Object.fromEntries([...new Set(results.map((row) => row.category))].map((category) => [category, results.filter((row) => row.category === category).length])),
+  },
   scanner: "riskSignals",
   fixtureCount: results.length,
   passed: results.filter((row) => row.pass).length,
   failed: results.filter((row) => !row.pass).length,
   confusion: { tp, tn, fp, fn },
-  metrics: { precision, recall, f1: precision !== null && recall !== null && precision + recall ? (2 * precision * recall) / (precision + recall) : null, coverage: results.filter((row) => row.actual !== "registry-unavailable").length / results.length, unknownRate: results.filter((row) => row.actual === "registry-unavailable").length / results.length, medianLatencyMs: results.map((row) => row.latencyMs).sort((a, b) => a - b)[Math.floor(results.length / 2)] },
+  metrics: {
+    precision,
+    recall,
+    f1: precision !== null && recall !== null && precision + recall ? (2 * precision * recall) / (precision + recall) : null,
+    specificity,
+    falsePositiveRate,
+    falseNegativeRate,
+    coverage: results.filter((row) => row.actual !== "registry-unavailable").length / results.length,
+    unknownRate: results.filter((row) => row.actual === "registry-unavailable").length / results.length,
+    registryUnavailableRate: results.filter((row) => row.actual === "registry-unavailable").length / results.length,
+    latencyMs: { p50: percentile(0.5), p95: percentile(0.95), p99: percentile(0.99) },
+  },
   byCategory,
   elapsedMs: Number((performance.now() - started).toFixed(3)),
   results,

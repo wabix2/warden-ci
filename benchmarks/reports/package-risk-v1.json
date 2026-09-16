@@ -2,6 +2,28 @@
   "dataset": "warden-package-risk-v1",
   "datasetType": "synthetic-fixture",
   "evaluationDate": "2026-09-16",
+  "provenance": {
+    "source": "synthetic local fixtures",
+    "retrievalDate": "2026-09-16",
+    "registry": "recorded metadata"
+  },
+  "labelMethodology": "Fixture labels are explicit expected states; unresolved examples must not be included in accuracy metrics.",
+  "exclusions": [],
+  "distributions": {
+    "ecosystems": {
+      "npm": 10
+    },
+    "categories": {
+      "legitimate-popular": 1,
+      "legitimate-niche": 1,
+      "legitimate-new": 1,
+      "nonexistent": 2,
+      "typosquat": 1,
+      "dependency-confusion": 1,
+      "suspicious-existing": 1,
+      "registry-unavailable": 2
+    }
+  },
   "scanner": "riskSignals",
   "fixtureCount": 10,
   "passed": 10,
@@ -16,9 +38,17 @@
     "precision": 1,
     "recall": 1,
     "f1": 1,
+    "specificity": 1,
+    "falsePositiveRate": 0,
+    "falseNegativeRate": 0,
     "coverage": 0.8,
     "unknownRate": 0.2,
-    "medianLatencyMs": 0.011
+    "registryUnavailableRate": 0.2,
+    "latencyMs": {
+      "p50": 0.013,
+      "p95": 0.195,
+      "p99": 0.195
+    }
   },
   "byCategory": {
     "legitimate-popular": {
@@ -62,7 +92,7 @@
       "unknown": 2
     }
   },
-  "elapsedMs": 0.745,
+  "elapsedMs": 0.807,
   "results": [
     {
       "id": "safe-popular",
@@ -75,7 +105,7 @@
         "latestVersion": "18.3.1"
       },
       "actual": "safe",
-      "latencyMs": 0.222,
+      "latencyMs": 0.195,
       "pass": true
     },
     {
@@ -89,7 +119,7 @@
         "latestVersion": "1.2.0"
       },
       "actual": "safe",
-      "latencyMs": 0.035,
+      "latencyMs": 0.034,
       "pass": true
     },
     {
@@ -104,7 +134,7 @@
         "latestVersion": "0.4.0"
       },
       "actual": "safe",
-      "latencyMs": 0.011,
+      "latencyMs": 0.008,
       "pass": true
     },
     {
@@ -117,7 +147,7 @@
         "lookupStatus": "not_found"
       },
       "actual": "hallucinated",
-      "latencyMs": 0.01,
+      "latencyMs": 0.013,
       "pass": true
     },
     {
@@ -130,7 +160,7 @@
         "lookupStatus": "not_found"
       },
       "actual": "hallucinated",
-      "latencyMs": 0.006,
+      "latencyMs": 0.004,
       "pass": true
     },
     {
@@ -144,7 +174,7 @@
         "publishedDaysAgo": 5
       },
       "actual": "typosquat-suspect",
-      "latencyMs": 0.155,
+      "latencyMs": 0.148,
       "pass": true
     },
     {
@@ -160,7 +190,7 @@
         "latestReleaseDaysAgo": 3
       },
       "actual": "dependency-confusion-suspect",
-      "latencyMs": 0.02,
+      "latencyMs": 0.019,
       "pass": true
     },
     {
@@ -179,7 +209,7 @@
         "latestReleaseDaysAgo": 4
       },
       "actual": "maintainer-takeover-suspect",
-      "latencyMs": 0.011,
+      "latencyMs": 0.013,
       "pass": true
     },
     {
@@ -192,7 +222,7 @@
         "lookupStatus": "unavailable"
       },
       "actual": "registry-unavailable",
-      "latencyMs": 0.006,
+      "latencyMs": 0.003,
       "pass": true
     },
     {

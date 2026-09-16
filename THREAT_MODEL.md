@@ -1,30 +1,16 @@
-# Warden CI Threat Model
+# Warden threat model
 
-Status: engineering threat model; deployment-specific verification remains required.
+| Asset | Attacker | Preconditions / attack | Existing control | Test | Residual risk |
+|---|---|---|---|---|---|
+| Scan verdict | malicious package author | manipulates metadata or name | provider normalization, evidence, UNKNOWN state | registry adversarial tests | metadata can be incomplete |
+| Tenant data | authenticated user | swaps IDs in HTTP request | server-side installation/repository authorization | multi-tenant helper harness | deployed HTTP isolation pending |
+| GitHub installation | compromised account/member | stale or transferred repository relationship | GitHub API permission check | authorization suite | real lifecycle not externally verified |
+| Webhook state | attacker/replayed delivery | forged, duplicate, reordered payload | HMAC verification and delivery-key design | lifecycle harness | active executor/lifecycle deployment pending |
+| Premium entitlement | client or forged provider event | attempts client-side grant or replay | server-side Redis record and signed webhook path | billing suite | provider sandbox verification pending |
+| Developer privacy | malicious workspace | repeated scan or crafted package name | package-level metadata request; no source upload in client | client review and registry tests | deployed traffic inspection pending |
+| Extension stability | malicious workspace | rapid edits, close, deactivate | AbortController and generation suppression | extension tests | clean external VS Code install pending |
+| Registry availability | hostile upstream | timeout, 429, malformed response | bounded fetch and registry-unavailable verdict | registry adversarial tests | provider-specific large-response limits need further deployment testing |
 
-## Assets and trust boundaries
+## Positioning constraint
 
-- GitHub OAuth access tokens, app credentials, and webhook secrets.
-- Repository metadata, scan findings, policies, audit records, and billing entitlements.
-- Boundaries: browser/VS Code extension to Warden API; GitHub to webhook endpoint; Warden to GitHub APIs; Warden to package registries; Warden to Redis/Postgres.
-
-## Threats and verification
-
-| Threat | Attack | Mitigation | Verification |
-| --- | --- | --- | --- |
-| False-safe registry result | Registry timeout or malformed response | Providers represent unavailable state and do not fail open | Package-risk regression and chaos fixtures |
-| OAuth session replay | Reuse expired or malformed cookie/session record | Structured session validation and expiry check | Authorization tests, including malformed identifiers and expired sessions |
-| Repository IDOR | Change run/repository/installation identifier | Authorization derives installation and repository from the server-side run row, then verifies GitHub access | Cross-installation authorization tests |
-| Webhook forgery | Submit altered payload or signature | HMAC SHA-256 verification over raw bytes | Webhook security harness |
-| Webhook duplication | Replay delivery identifier | Delivery idempotency exists in the deferred handler path; production activation remains unverified | Requires enabled-handler integration test |
-| Tenant audit exposure | Query another tenant's audit identifier | Must enforce tenant scope at every audit query | Production integration test still required |
-| Cache poisoning | Reuse result across provider/package/version | Cache keys and TTL must include provider and package identity | Cache-specific adversarial suite required |
-| Token leakage | Log or return secrets | Structured logs omit credentials; review deployment logs | Secret scan and log review required |
-| Malicious extension input | Pathological or malformed source text | Bounded extraction and asynchronous diagnostics | Extension parser and packaging tests |
-| Billing forgery | Fake success URL or webhook | Entitlements must be derived server-side from verified provider state | Billing integration verification remains pending |
-
-## Residual risks
-
-- The current GitHub webhook handler intentionally returns after signature/action validation because GitHub Actions is the canonical gate; the deferred scanning branch is not production evidence until enabled and tested end-to-end.
-- Redis/Postgres tenant isolation, audit mutation controls, and billing provider authenticity require deployment-backed integration tests.
-- Registry intelligence is evidence-based but cannot prove AI authorship; nonexistent packages should be described as registry-nonexistent or AI-associated only when provenance exists.
+Warden is intentionally scoped as control-plane security for AI-introduced dependencies across IDE, CI, policy, and evidence surfaces. Generic SAST, chatbot features, and unrelated detectors are excluded because they would dilute the central workflow and expand the attack surface without closing the current evidence gaps.
