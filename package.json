@@ -11,6 +11,7 @@
     "test:popular": "pnpm build && node --test scripts/test-popular-packages.mjs",
     "test:package-risk": "pnpm build && node --test scripts/test-package-risk-signals.mjs",
     "benchmark:package-risk": "pnpm build && node scripts/benchmark-package-risk.mjs",
+    "benchmark:evaluate": "pnpm build && node scripts/evaluate-package-risk.mjs",
     "test:advisories": "pnpm build && node --test scripts/test-advisories.mjs",
     "test:corpus-privacy": "pnpm build && node --test scripts/test-corpus-privacy.mjs",
     "warden-scan": "node scripts/warden-scan.mjs",

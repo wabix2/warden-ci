@@ -98,7 +98,7 @@ async function checkPackageRisk(ecosystem, linesByPackage) {
                         severity: "warning",
                         message: `Warden could not verify package "${pkg}" because the ${ecosystem.label} registry was unavailable. This result is UNKNOWN, not safe or malicious.`,
                         category: "dependency",
-                        confidence: "medium",
+                        confidence: verdict.confidence,
                         remediation: `Retry when the ${ecosystem.label} registry is available or verify the package directly before installing.`,
                         fingerprint: `dependency:${ecosystem.id}:${pkg}:registry-unavailable`,
                     });
@@ -110,7 +110,7 @@ async function checkPackageRisk(ecosystem, linesByPackage) {
                         severity: "failure",
                         message: `Package "${pkg}" has a high major version (${verdict.latestVersion}) but a thin, recent release history. Public metadata cannot prove an internal-name collision; treat this as a review signal for possible version-shadowing behavior.`,
                         category: "dependency",
-                        confidence: "medium",
+                        confidence: verdict.confidence,
                         remediation: "Compare this name against your private registries and lockfile policy, then verify the publisher and intended source before merging.",
                         fingerprint: `dependency:${ecosystem.id}:${pkg}:dependency-confusion`,
                     });
@@ -122,7 +122,7 @@ async function checkPackageRisk(ecosystem, linesByPackage) {
                         severity: "failure",
                         message: `Popular npm package "${pkg}" appears to have a recent release from a different observed publisher (${verdict.latestPublisher ?? "unknown"}). Public metadata cannot prove compromise; verify the release and publisher before merging.`,
                         category: "dependency",
-                        confidence: "medium",
+                        confidence: verdict.confidence,
                         remediation: "Review the release provenance, publisher account, signed artifacts, and lockfile before approving this dependency.",
                         fingerprint: `dependency:${ecosystem.id}:${pkg}:maintainer-takeover`,
                     });

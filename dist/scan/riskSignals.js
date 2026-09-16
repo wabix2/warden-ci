@@ -44,10 +44,10 @@ function closestPopularPackage(packageName, popular) {
 async function assessPackage(packageName, ecosystem) {
     const metadata = await ecosystem.fetchMetadata(packageName);
     if (metadata.lookupStatus === "unavailable") {
-        return { packageName, verdict: "registry-unavailable" };
+        return { packageName, verdict: "registry-unavailable", confidence: "low", reasons: ["Registry lookup was unavailable"], evidence: [{ type: "registry", summary: "The configured registry did not return a usable result" }] };
     }
     if (!metadata.existsOnRegistry) {
-        return { packageName, verdict: "hallucinated" };
+        return { packageName, verdict: "hallucinated", confidence: "high", reasons: ["Package was not found in the configured registry"], evidence: [{ type: "registry", summary: "Registry lookup returned not found" }] };
     }
     const close = closestPopularPackage(packageName, ecosystem.popularPackages);
     if (close &&
@@ -58,6 +58,9 @@ async function assessPackage(packageName, ecosystem) {
             verdict: "typosquat-suspect",
             impersonating: close.name,
             publishedDaysAgo: metadata.publishedDaysAgo,
+            confidence: "medium",
+            reasons: [`Name is within ${close.distance} edit distance of ${close.name}`],
+            evidence: [{ type: "similarity", summary: `Similar popular package: ${close.name}`, value: close.distance }, { type: "metadata", summary: "Package is recently published", value: metadata.publishedDaysAgo }],
         };
     }
     const majorVersion = metadata.latestVersion?.match(/^(\d+)/)?.[1];
@@ -68,7 +71,7 @@ async function assessPackage(packageName, ecosystem) {
         && metadata.latestReleaseDaysAgo !== undefined
         && metadata.latestReleaseDaysAgo <= DEPENDENCY_CONFUSION_FRESHNESS_DAYS;
     if (dependencyConfusionSuspect) {
-        return { packageName, verdict: "dependency-confusion-suspect", latestVersion: metadata.latestVersion };
+        return { packageName, verdict: "dependency-confusion-suspect", latestVersion: metadata.latestVersion, confidence: "medium", reasons: ["High version with a thin, recent release history"], evidence: [{ type: "metadata", summary: "Latest version", value: metadata.latestVersion }, { type: "metadata", summary: "Observed release count", value: metadata.releaseCount }] };
     }
     const maintainerTakeoverSuspect = ecosystem.id === "npm"
         && ecosystem.popularPackages.includes(packageName)
@@ -78,7 +81,7 @@ async function assessPackage(packageName, ecosystem) {
         && metadata.latestReleaseDaysAgo !== undefined
         && metadata.latestReleaseDaysAgo <= TAKEOVER_FRESHNESS_DAYS;
     if (maintainerTakeoverSuspect) {
-        return { packageName, verdict: "maintainer-takeover-suspect", latestPublisher: metadata.latestPublisher };
+        return { packageName, verdict: "maintainer-takeover-suspect", latestPublisher: metadata.latestPublisher, confidence: "medium", reasons: ["Recent publisher change on a popular package"], evidence: [{ type: "metadata", summary: "Publisher history changed", value: metadata.publisherHistory?.join(" -> ") ?? "unknown" }, { type: "metadata", summary: "Recent release", value: metadata.latestReleaseDaysAgo }] };
     }
     return null; // exists, and nothing suspicious about it
 }

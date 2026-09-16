@@ -36,6 +36,10 @@ Warden governs dependency risk introduced during AI-assisted development. It doe
 
 `not_found` means the registry answered and did not identify the package. `unavailable` means Warden could not determine the answer because of timeout, non-success response, or malformed metadata. Unavailable results become `registry-unavailable`, never `hallucinated` or safe.
 
+## Verdict evidence
+
+Risk assessments return a structured verdict with confidence, human-readable reasons, and typed evidence. Registry-unavailable is represented as UNKNOWN and is not treated as safe or malicious. The same scan core is used by server and extension-facing flows.
+
 ## Current limitations
 
 The repository contains deterministic local evidence, but deployed two-tenant authorization, production webhook processing/idempotency, provider-backed billing webhooks, and a real-world labeled benchmark corpus still require external infrastructure and credentials.
