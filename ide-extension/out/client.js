@@ -13,9 +13,9 @@ exports.pollCliSession = pollCliSession;
 function trimBase(serverUrl) {
     return serverUrl.replace(/\/+$/, "");
 }
-async function checkPackage(serverUrl, ecosystem, name, fetchImpl = fetch) {
+async function checkPackage(serverUrl, ecosystem, name, fetchImpl = fetch, signal) {
     const url = `${trimBase(serverUrl)}/api/check/package?ecosystem=${encodeURIComponent(ecosystem)}&name=${encodeURIComponent(name)}`;
-    const response = await fetchImpl(url);
+    const response = await fetchImpl(url, { signal });
     if (!response.ok)
         throw new Error(`Warden package check failed (${response.status})`);
     return (await response.json());

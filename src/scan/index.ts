@@ -136,6 +136,17 @@ async function checkPackageRisk(
             remediation: "Compare the package owner, repository, release history, and lockfile before approving this dependency.",
             fingerprint: `dependency:${ecosystem.id}:${pkg}:typosquat:${verdict.impersonating}`,
           });
+        } else if (verdict.verdict === "registry-unavailable") {
+          annotations.push({
+            line,
+            title: "Registry verification unavailable",
+            severity: "warning",
+            message: `Warden could not verify package "${pkg}" because the ${ecosystem.label} registry was unavailable. This result is UNKNOWN, not safe or malicious.`,
+            category: "dependency",
+            confidence: "medium",
+            remediation: `Retry when the ${ecosystem.label} registry is available or verify the package directly before installing.`,
+            fingerprint: `dependency:${ecosystem.id}:${pkg}:registry-unavailable`,
+          });
         } else if (verdict.verdict === "dependency-confusion-suspect") {
           annotations.push({
             line,

@@ -672,6 +672,8 @@ function describePackageVerdict(label: string, v: NonNullable<Awaited<ReturnType
       return { severity: "warning", message: `Package "${v.packageName}" exists but was only published ${v.publishedDaysAgo} day(s) ago and is a near-exact match for the popular package "${v.impersonating}". This is a common pattern for typosquat/slopsquat attacks — confirm this is the package you meant before installing.`, remediation: "Compare the package owner, repository, release history, and lockfile before adding this dependency." };
     case "dependency-confusion-suspect":
       return { severity: "warning", message: `Package "${v.packageName}" has a high major version (${v.latestVersion}) but a thin, recent release history — a review signal for possible version-shadowing behavior.`, remediation: "Compare this name against your private registries and lockfile policy, then verify the publisher and intended source before installing." };
+    case "registry-unavailable":
+      return { severity: "warning", message: `Warden could not verify "${v.packageName}" because the ${label} registry was unavailable. This is UNKNOWN, not safe or malicious.`, remediation: "Retry when the registry is available or verify the package directly before installing." };
     default:
       return { severity: "warning", message: `Package "${v.packageName}" appears to have a recent release from a different observed publisher (${v.latestPublisher ?? "unknown"}). Verify the release and publisher before installing.`, remediation: "Review the release provenance, publisher account, and lockfile before adding this dependency." };
   }

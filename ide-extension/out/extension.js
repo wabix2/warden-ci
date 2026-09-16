@@ -71,6 +71,7 @@ const CACHE_TTL_MS = 15 * 60 * 1000;
 const verdictCache = new Map();
 const flaggedByDoc = new Map();
 const scanGeneration = new Map();
+const scanControllers = new Map();
 let isPro = false;
 let statusBarItem;
 function serverUrl() {
@@ -80,7 +81,7 @@ function serverUrl() {
 function extensionEnabled() {
     return vscode.workspace.getConfiguration("wardenCheck").get("enabled", true);
 }
-async function checkWithCache(ecosystem, name) {
+async function checkWithCache(ecosystem, name, signal) {
     const key = `${ecosystem}:${name}`;
     const cached = verdictCache.get(key);
     if (cached && cached.expiresAt > Date.now())
@@ -88,7 +89,7 @@ async function checkWithCache(ecosystem, name) {
     if (cached)
         verdictCache.delete(key);
     try {
-        const result = await (0, client_1.checkPackage)(serverUrl(), ecosystem, name);
+        const result = await (0, client_1.checkPackage)(serverUrl(), ecosystem, name, fetch, signal);
         verdictCache.set(key, { result, expiresAt: Date.now() + CACHE_TTL_MS });
         return result;
     }
@@ -102,6 +103,9 @@ async function scanDocument(doc) {
     const documentKey = doc.uri.toString();
     const generation = (scanGeneration.get(documentKey) ?? 0) + 1;
     scanGeneration.set(documentKey, generation);
+    scanControllers.get(documentKey)?.abort();
+    const controller = new AbortController();
+    scanControllers.set(documentKey, controller);
     const ecosystem = (0, detection_1.ecosystemForLanguage)(doc.languageId);
     if (!ecosystem || !extensionEnabled()) {
         diagnostics.delete(doc.uri);
@@ -111,9 +115,11 @@ async function scanDocument(doc) {
     const imports = (0, detection_1.parseImports)(doc.getText(), ecosystem);
     const uniqueNames = [...new Set(imports.map((i) => i.packageName))];
     const results = new Map();
-    await Promise.all(uniqueNames.map(async (name) => results.set(name, await checkWithCache(ecosystem, name))));
+    await Promise.all(uniqueNames.map(async (name) => results.set(name, await checkWithCache(ecosystem, name, controller.signal))));
     if (scanGeneration.get(documentKey) !== generation)
         return;
+    if (scanControllers.get(documentKey) === controller)
+        scanControllers.delete(documentKey);
     const issues = [];
     const flagged = [];
     for (const imp of imports) {
@@ -260,6 +266,9 @@ function activate(context) {
     }));
 }
 function deactivate() {
+    for (const controller of scanControllers.values())
+        controller.abort();
+    scanControllers.clear();
     diagnostics.dispose();
     statusBarItem?.dispose();
 }

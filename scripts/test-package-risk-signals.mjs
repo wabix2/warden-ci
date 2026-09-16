@@ -19,7 +19,12 @@ test("recorded PyPI JSON has release upload times but no uploader identity", () 
   assert.equal("uploader" in pypiFixture.releases["2.9.2"][0], false);
 });
 
-test("dependency confusion requires high version plus thin recent history", async () => {
+  test("registry outages remain explicitly unknown", async () => {
+    const result = await assessPackage("temporarily-unavailable", ecosystem("npm", { existsOnRegistry: false, lookupStatus: "unavailable" }));
+    assert.equal(result?.verdict, "registry-unavailable");
+  });
+
+  test("dependency confusion requires high version plus thin recent history", async () => {
   const result = await assessPackage("internal-helper", ecosystem("npm", { existsOnRegistry: true, latestVersion: "999.0.0", releaseCount: 2, latestReleaseDaysAgo: 2 }));
   assert.equal(result?.verdict, "dependency-confusion-suspect");
   const boundary = await assessPackage("legitimate-v10", ecosystem("npm", { existsOnRegistry: true, latestVersion: "10.0.0", releaseCount: 4, latestReleaseDaysAgo: 2 }));

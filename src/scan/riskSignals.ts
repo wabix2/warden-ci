@@ -1,7 +1,7 @@
 import { Ecosystem } from "./ecosystems/types";
 import { levenshtein } from "./levenshtein";
 
-export type Verdict = "hallucinated" | "typosquat-suspect" | "dependency-confusion-suspect" | "maintainer-takeover-suspect" | "known-malware";
+export type Verdict = "hallucinated" | "typosquat-suspect" | "dependency-confusion-suspect" | "maintainer-takeover-suspect" | "known-malware" | "registry-unavailable";
 
 export interface PackageVerdict {
   packageName: string;
@@ -55,7 +55,7 @@ export async function assessPackage(packageName: string, ecosystem: Ecosystem): 
   const metadata = await ecosystem.fetchMetadata(packageName);
 
   if (metadata.lookupStatus === "unavailable") {
-    throw new Error(`Registry lookup unavailable for ${ecosystem.id}:${packageName}`);
+    return { packageName, verdict: "registry-unavailable" };
   }
 
   if (!metadata.existsOnRegistry) {

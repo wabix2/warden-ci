@@ -45,6 +45,7 @@ interface FlaggedImport {
 }
 const flaggedByDoc = new Map<string, FlaggedImport[]>();
 const scanGeneration = new Map<string, number>();
+const scanControllers = new Map<string, AbortController>();
 
 let isPro = false;
 let statusBarItem: vscode.StatusBarItem;
@@ -58,13 +59,13 @@ function extensionEnabled(): boolean {
   return vscode.workspace.getConfiguration("wardenCheck").get<boolean>("enabled", true);
 }
 
-async function checkWithCache(ecosystem: ExtensionEcosystem, name: string): Promise<CheckResult | null> {
+async function checkWithCache(ecosystem: ExtensionEcosystem, name: string, signal: AbortSignal): Promise<CheckResult | null> {
   const key = `${ecosystem}:${name}`;
   const cached = verdictCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.result;
   if (cached) verdictCache.delete(key);
   try {
-    const result = await checkPackage(serverUrl(), ecosystem, name);
+    const result = await checkPackage(serverUrl(), ecosystem, name, fetch, signal);
     verdictCache.set(key, { result, expiresAt: Date.now() + CACHE_TTL_MS });
     return result;
   } catch (error) {
@@ -78,6 +79,9 @@ async function scanDocument(doc: vscode.TextDocument): Promise<void> {
   const documentKey = doc.uri.toString();
   const generation = (scanGeneration.get(documentKey) ?? 0) + 1;
   scanGeneration.set(documentKey, generation);
+  scanControllers.get(documentKey)?.abort();
+  const controller = new AbortController();
+  scanControllers.set(documentKey, controller);
   const ecosystem = ecosystemForLanguage(doc.languageId);
   if (!ecosystem || !extensionEnabled()) {
     diagnostics.delete(doc.uri);
@@ -88,9 +92,10 @@ async function scanDocument(doc: vscode.TextDocument): Promise<void> {
   const imports = parseImports(doc.getText(), ecosystem);
   const uniqueNames = [...new Set(imports.map((i) => i.packageName))];
   const results = new Map<string, CheckResult | null>();
-  await Promise.all(uniqueNames.map(async (name) => results.set(name, await checkWithCache(ecosystem, name))));
+  await Promise.all(uniqueNames.map(async (name) => results.set(name, await checkWithCache(ecosystem, name, controller.signal))));
 
   if (scanGeneration.get(documentKey) !== generation) return;
+  if (scanControllers.get(documentKey) === controller) scanControllers.delete(documentKey);
   const issues: vscode.Diagnostic[] = [];
   const flagged: FlaggedImport[] = [];
   for (const imp of imports) {
@@ -263,6 +268,8 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
+  for (const controller of scanControllers.values()) controller.abort();
+  scanControllers.clear();
   diagnostics.dispose();
   statusBarItem?.dispose();
 }

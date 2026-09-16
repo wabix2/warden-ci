@@ -16,7 +16,7 @@ const ecosystem = { id: "npm", popularPackages: popular, async fetchMetadata(nam
 const results = [];
 for (const fixture of fixtures) {
   let actual = "unknown";
-  try { actual = (await assessPackage(fixture.packageName, ecosystem))?.verdict ?? "safe"; } catch { actual = "unknown"; }
+  try { actual = (await assessPackage(fixture.packageName, ecosystem))?.verdict ?? "safe"; } catch { actual = "error"; }
   results.push({ ...fixture, actual, pass: actual === fixture.expected });
 }
 const passed = results.filter((result) => result.pass).length;

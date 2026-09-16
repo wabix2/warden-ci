@@ -6,7 +6,7 @@
  * name + ecosystem there and reads the verdict back.
  */
 
-export type PackageVerdict = "hallucinated" | "typosquat-suspect" | "dependency-confusion-suspect" | "maintainer-takeover-suspect";
+export type PackageVerdict = "hallucinated" | "typosquat-suspect" | "dependency-confusion-suspect" | "maintainer-takeover-suspect" | "registry-unavailable" | "known-malware";
 
 export interface CheckResult {
   ok: boolean;
@@ -35,9 +35,9 @@ function trimBase(serverUrl: string): string {
   return serverUrl.replace(/\/+$/, "");
 }
 
-export async function checkPackage(serverUrl: string, ecosystem: string, name: string, fetchImpl: FetchLike = fetch): Promise<CheckResult> {
+export async function checkPackage(serverUrl: string, ecosystem: string, name: string, fetchImpl: FetchLike = fetch, signal?: AbortSignal): Promise<CheckResult> {
   const url = `${trimBase(serverUrl)}/api/check/package?ecosystem=${encodeURIComponent(ecosystem)}&name=${encodeURIComponent(name)}`;
-  const response = await fetchImpl(url);
+  const response = await fetchImpl(url, { signal });
   if (!response.ok) throw new Error(`Warden package check failed (${response.status})`);
   return (await response.json()) as CheckResult;
 }
