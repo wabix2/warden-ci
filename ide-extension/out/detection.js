@@ -20,10 +20,13 @@ function ecosystemForLanguage(languageId) {
         return "npm";
     if (languageId === "python")
         return "pypi";
+<<<<<<< HEAD
     if (languageId === "rust")
         return "cargo";
     if (languageId === "go")
         return "go";
+=======
+>>>>>>> origin/main
     return null;
 }
 // Mirrors src/scan/ecosystems/npm.ts: skip relative/absolute/URL specifiers and
@@ -134,6 +137,7 @@ function parsePythonLine(content, lineIdx, out, seen) {
         addPythonModule(module, content, lineIdx, out, seen);
     }
 }
+<<<<<<< HEAD
 function parseCargoLine(content, lineIdx, out, seen) {
     const match = /^\\s*(?:use|extern\\s+crate)\\s+([a-zA-Z][a-zA-Z0-9_-]*)/.exec(content);
     if (!match || ["std", "core", "alloc", "crate", "self", "super"].includes(match[1]))
@@ -152,18 +156,25 @@ function parseGoLine(content, lineIdx, out, seen) {
         pushUnique(out, seen, { ecosystem: "go", packageName: pkg, line: lineIdx, startCol: match.index + 1, endCol: match.index + 1 + path.length });
     }
 }
+=======
+>>>>>>> origin/main
 function parseImports(text, ecosystem) {
     const out = [];
     const seen = new Set();
     text.split(/\r?\n/).forEach((content, lineIdx) => {
         if (ecosystem === "npm")
             parseNpmLine(content, lineIdx, out, seen);
+<<<<<<< HEAD
         else if (ecosystem === "pypi")
             parsePythonLine(content, lineIdx, out, seen);
         else if (ecosystem === "cargo")
             parseCargoLine(content, lineIdx, out, seen);
         else
             parseGoLine(content, lineIdx, out, seen);
+=======
+        else
+            parsePythonLine(content, lineIdx, out, seen);
+>>>>>>> origin/main
     });
     return out;
 }

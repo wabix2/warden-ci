@@ -1,7 +1,11 @@
 {
   "name": "warden-check",
   "displayName": "Warden Check",
+<<<<<<< HEAD
   "description": "Flags hallucinated, typosquat, and suspicious npm, PyPI, crates.io, and Go dependencies as you write code.",
+=======
+  "description": "Flags hallucinated/typosquat npm and PyPI package names as you type, before you commit them — the same detection Warden CI runs on pull requests, moved upstream to where the code is written.",
+>>>>>>> origin/main
   "version": "0.2.0",
   "publisher": "warden-ci",
   "icon": "icon.png",
@@ -24,18 +28,26 @@
     "typosquat",
     "hallucinated packages",
     "npm",
+<<<<<<< HEAD
     "pypi",
     "crates.io",
     "go modules"
+=======
+    "pypi"
+>>>>>>> origin/main
   ],
   "activationEvents": [
     "onLanguage:javascript",
     "onLanguage:typescript",
     "onLanguage:javascriptreact",
     "onLanguage:typescriptreact",
+<<<<<<< HEAD
     "onLanguage:python",
     "onLanguage:rust",
     "onLanguage:go"
+=======
+    "onLanguage:python"
+>>>>>>> origin/main
   ],
   "main": "./out/extension.js",
   "contributes": {

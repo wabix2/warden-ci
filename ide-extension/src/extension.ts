@@ -33,8 +33,12 @@ const diagnostics = vscode.languages.createDiagnosticCollection("warden-check");
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 // Cache verdicts for the session so re-scans on every keystroke don't re-hit the
 // backend for packages we already know about.
+<<<<<<< HEAD
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const verdictCache = new Map<string, { result: CheckResult; expiresAt: number }>();
+=======
+const verdictCache = new Map<string, CheckResult>();
+>>>>>>> origin/main
 
 interface FlaggedImport {
   range: vscode.Range;
@@ -44,7 +48,10 @@ interface FlaggedImport {
   message: string;
 }
 const flaggedByDoc = new Map<string, FlaggedImport[]>();
+<<<<<<< HEAD
 const scanGeneration = new Map<string, number>();
+=======
+>>>>>>> origin/main
 
 let isPro = false;
 let statusBarItem: vscode.StatusBarItem;
@@ -61,11 +68,18 @@ function extensionEnabled(): boolean {
 async function checkWithCache(ecosystem: ExtensionEcosystem, name: string): Promise<CheckResult | null> {
   const key = `${ecosystem}:${name}`;
   const cached = verdictCache.get(key);
+<<<<<<< HEAD
   if (cached && cached.expiresAt > Date.now()) return cached.result;
   if (cached) verdictCache.delete(key);
   try {
     const result = await checkPackage(serverUrl(), ecosystem, name);
     verdictCache.set(key, { result, expiresAt: Date.now() + CACHE_TTL_MS });
+=======
+  if (cached) return cached;
+  try {
+    const result = await checkPackage(serverUrl(), ecosystem, name);
+    verdictCache.set(key, result);
+>>>>>>> origin/main
     return result;
   } catch (error) {
     // Network/registry outage must never become a false finding — skip silently.
@@ -75,9 +89,12 @@ async function checkWithCache(ecosystem: ExtensionEcosystem, name: string): Prom
 }
 
 async function scanDocument(doc: vscode.TextDocument): Promise<void> {
+<<<<<<< HEAD
   const documentKey = doc.uri.toString();
   const generation = (scanGeneration.get(documentKey) ?? 0) + 1;
   scanGeneration.set(documentKey, generation);
+=======
+>>>>>>> origin/main
   const ecosystem = ecosystemForLanguage(doc.languageId);
   if (!ecosystem || !extensionEnabled()) {
     diagnostics.delete(doc.uri);
@@ -90,7 +107,10 @@ async function scanDocument(doc: vscode.TextDocument): Promise<void> {
   const results = new Map<string, CheckResult | null>();
   await Promise.all(uniqueNames.map(async (name) => results.set(name, await checkWithCache(ecosystem, name))));
 
+<<<<<<< HEAD
   if (scanGeneration.get(documentKey) !== generation) return;
+=======
+>>>>>>> origin/main
   const issues: vscode.Diagnostic[] = [];
   const flagged: FlaggedImport[] = [];
   for (const imp of imports) {
@@ -247,7 +267,11 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.showInformationMessage("Warden remediation guidance copied to clipboard.");
     }),
     vscode.languages.registerCodeActionsProvider(
+<<<<<<< HEAD
       [{ language: "javascript" }, { language: "typescript" }, { language: "javascriptreact" }, { language: "typescriptreact" }, { language: "python" }, { language: "rust" }, { language: "go" }],
+=======
+      [{ language: "javascript" }, { language: "typescript" }, { language: "javascriptreact" }, { language: "typescriptreact" }, { language: "python" }],
+>>>>>>> origin/main
       new WardenCodeActionProvider(),
       { providedCodeActionKinds: WardenCodeActionProvider.providedKinds }
     ),
@@ -257,7 +281,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidCloseTextDocument((doc) => {
       diagnostics.delete(doc.uri);
       flaggedByDoc.delete(doc.uri.toString());
+<<<<<<< HEAD
       scanGeneration.delete(doc.uri.toString());
+=======
+>>>>>>> origin/main
     })
   );
 }

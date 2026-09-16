@@ -5,9 +5,13 @@ import { checkDangerousExec } from "./dangerousExec";
 import { assessPackage, PackageVerdict } from "./riskSignals";
 import { queryMalwareAdvisories, osvEcosystemFor, MalwareAdvisory } from "./advisories";
 import { npmEcosystem } from "./ecosystems/npm";
+<<<<<<< HEAD
   import { pypiEcosystem } from "./ecosystems/pypi";
   import { cargoEcosystem } from "./ecosystems/cargo";
   import { goEcosystem } from "./ecosystems/go";
+=======
+import { pypiEcosystem } from "./ecosystems/pypi";
+>>>>>>> origin/main
 import { Ecosystem } from "./ecosystems/types";
 import { rustEcosystem } from "./ecosystems/rust";
 import { rubyEcosystem } from "./ecosystems/ruby";
@@ -57,7 +61,11 @@ export interface ScanResult {
 
 const MAX_ANNOTATIONS = 50; // GitHub Check Run API accepts at most 50 annotations per request
 
+<<<<<<< HEAD
   const ECOSYSTEMS: Ecosystem[] = [npmEcosystem, pypiEcosystem, cargoEcosystem, goEcosystem, rustEcosystem, rubyEcosystem];
+=======
+const ECOSYSTEMS: Ecosystem[] = [npmEcosystem, pypiEcosystem, rustEcosystem, rubyEcosystem];
+>>>>>>> origin/main
 
 function ecosystemForFile(filename: string): Ecosystem | undefined {
   const ext = path.extname(filename).toLowerCase();

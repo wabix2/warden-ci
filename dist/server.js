@@ -15,8 +15,11 @@ const riskSignals_1 = require("./scan/riskSignals");
 const advisories_1 = require("./scan/advisories");
 const npm_1 = require("./scan/ecosystems/npm");
 const pypi_1 = require("./scan/ecosystems/pypi");
+<<<<<<< HEAD
 const cargo_1 = require("./scan/ecosystems/cargo");
 const go_1 = require("./scan/ecosystems/go");
+=======
+>>>>>>> origin/main
 const db_1 = require("./db");
 const schema_1 = require("./db/schema");
 const policy_1 = require("./enforcement/policy");
@@ -35,6 +38,7 @@ const gmail_1 = require("./outreach/gmail");
 const audience_1 = require("./outreach/audience");
 const publicUrl_1 = require("./lib/publicUrl");
 const app = (0, express_1.default)();
+<<<<<<< HEAD
 app.disable("x-powered-by");
 app.use((_req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -44,6 +48,8 @@ app.use((_req, res, next) => {
         res.setHeader("Strict-Transport-Security", "max-age=63072000");
     next();
 });
+=======
+>>>>>>> origin/main
 const PORT = Number(process.env.PORT || 3000);
 const OAUTH_STATE_COOKIE = "warden_oauth_state";
 // Marks a GitHub OAuth flow that was started by an editor/CLI client rather than a
@@ -665,7 +671,11 @@ app.get("/api/billing/status", async (req, res) => {
 // checks — the extension never re-implements the heuristics and improves the moment
 // this deploys, with no extension update required.
 // ---------------------------------------------------------------------------
+<<<<<<< HEAD
 const CLI_ECOSYSTEMS = { npm: npm_1.npmEcosystem, pypi: pypi_1.pypiEcosystem, cargo: cargo_1.cargoEcosystem, go: go_1.goEcosystem };
+=======
+const CLI_ECOSYSTEMS = { npm: npm_1.npmEcosystem, pypi: pypi_1.pypiEcosystem };
+>>>>>>> origin/main
 // Turns an assessPackage verdict into the same wording the PR scanner uses, so the
 // extension can render a finding without duplicating message/remediation copy.
 function describePackageVerdict(label, v) {
@@ -688,7 +698,11 @@ app.get("/api/check/package", async (req, res) => {
     const name = String(req.query.name || "").trim();
     const ecosystem = CLI_ECOSYSTEMS[ecosystemId];
     if (!ecosystem)
+<<<<<<< HEAD
         return res.status(400).json({ ok: false, error: "ecosystem must be one of: npm, pypi, cargo, go" });
+=======
+        return res.status(400).json({ ok: false, error: "ecosystem must be one of: npm, pypi" });
+>>>>>>> origin/main
     if (!name || name.length > 214 || !/^[@a-z0-9._/-]+$/i.test(name))
         return res.status(400).json({ ok: false, error: "A valid package name is required" });
     try {

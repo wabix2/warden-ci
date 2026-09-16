@@ -93,11 +93,15 @@ export async function authorizeRunAccessWithDependencies(req: Request, runId: st
 export function authorizeRunAccess(req: Request, runId: string): Promise<RunAccessResult> {
   return authorizeRunAccessWithDependencies(req, runId, {
     database: db,
+<<<<<<< HEAD
     sessionToken: async (sessionId) => {
       const session = await getRedisClient().get<{ accessToken?: string; expiresAt?: number }>(`warden:oauth:session:${sessionId}`);
       if (!session?.accessToken || !session.expiresAt || session.expiresAt <= Date.now()) return null;
       return session.accessToken;
     },
+=======
+    sessionToken: (sessionId) => getRedisClient().get<string>(`warden:oauth:session:${sessionId}`),
+>>>>>>> origin/main
     githubFetch: fetch,
   });
 }

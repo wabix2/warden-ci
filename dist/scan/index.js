@@ -12,13 +12,20 @@ const riskSignals_1 = require("./riskSignals");
 const advisories_1 = require("./advisories");
 const npm_1 = require("./ecosystems/npm");
 const pypi_1 = require("./ecosystems/pypi");
+<<<<<<< HEAD
 const cargo_1 = require("./ecosystems/cargo");
 const go_1 = require("./ecosystems/go");
+=======
+>>>>>>> origin/main
 const rust_1 = require("./ecosystems/rust");
 const ruby_1 = require("./ecosystems/ruby");
 const policy_1 = require("../enforcement/policy");
 const MAX_ANNOTATIONS = 50; // GitHub Check Run API accepts at most 50 annotations per request
+<<<<<<< HEAD
 const ECOSYSTEMS = [npm_1.npmEcosystem, pypi_1.pypiEcosystem, cargo_1.cargoEcosystem, go_1.goEcosystem, rust_1.rustEcosystem, ruby_1.rubyEcosystem];
+=======
+const ECOSYSTEMS = [npm_1.npmEcosystem, pypi_1.pypiEcosystem, rust_1.rustEcosystem, ruby_1.rubyEcosystem];
+>>>>>>> origin/main
 function ecosystemForFile(filename) {
     const ext = path_1.default.extname(filename).toLowerCase();
     return ECOSYSTEMS.find((e) => e.extensions.includes(ext));

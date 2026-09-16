@@ -43,9 +43,12 @@ function closestPopularPackage(packageName, popular) {
 }
 async function assessPackage(packageName, ecosystem) {
     const metadata = await ecosystem.fetchMetadata(packageName);
+<<<<<<< HEAD
     if (metadata.lookupStatus === "unavailable") {
         throw new Error(`Registry lookup unavailable for ${ecosystem.id}:${packageName}`);
     }
+=======
+>>>>>>> origin/main
     if (!metadata.existsOnRegistry) {
         return { packageName, verdict: "hallucinated" };
     }
