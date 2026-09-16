@@ -16,7 +16,8 @@ import type { Ecosystem } from "./scan/ecosystems/types";
 import { db } from "./db";
 import { repositories, scanRuns, findings, auditEvents, installations, remediations, policies, policyVersions, suppressions } from "./db/schema";
 import { DEFAULT_POLICY, validatePolicy, evaluateGate, policyAuditEvent, policyToCycloneDx, type EnforcementPolicy, type PolicySuppression, type PolicyDecision } from "./enforcement/policy";
-import { handlePullRequestWebhook } from "./github/webhookHandler";
+import { createWebhookHandler } from "./github/webhookHandler";
+import { createDurableWebhookStore } from "./github/webhookStore";
 import { getRedisClient } from "./lib/redis";
 import { getGumroadApiToken, verifyGumroadSale } from "./billing/gumroadConnect";
 import { getProRecord, isProActive } from "./billing/store";
@@ -276,7 +277,12 @@ app.post(
   express.raw({ type: "application/json" }),
   async (req: Request, res: Response) => {
     try {
-      await withTimeout(handlePullRequestWebhook(req, res));
+      await withTimeout(createWebhookHandler({
+      store: createDurableWebhookStore(),
+      process: async (_payload, deliveryId) => {
+        console.info(JSON.stringify({ event: "webhook_processing_deferred", deliveryId }));
+      },
+    })(req, res));
     } catch (error) {
       console.error(JSON.stringify({ event: "webhook_failed", error: error instanceof Error ? error.message : "unknown" }));
       if (!res.headersSent) res.status(504).json({ ok: false, error: "Webhook processing timed out or failed" });

@@ -9,6 +9,7 @@
     "test:webhook-security": "pnpm build && node --test scripts/test-webhook-security.mjs",
     "test:webhook-lifecycle": "pnpm build && node --test scripts/test-webhook-lifecycle.mjs",
     "test:webhook-state": "pnpm build && node scripts/test-webhook-state-machine.mjs",
+  "test:webhook-durable": "pnpm build && node scripts/test-webhook-durable-boundary.mjs",
     "test:run-authorization": "pnpm build && node --test scripts/test-run-authorization.mjs",
     "test:multitenant": "pnpm build && node --test scripts/test-multitenant-http.mjs",
     "test:staging-idor": "node scripts/test-staging-idor.mjs",

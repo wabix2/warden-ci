@@ -21,6 +21,7 @@ const db_1 = require("./db");
 const schema_1 = require("./db/schema");
 const policy_1 = require("./enforcement/policy");
 const webhookHandler_1 = require("./github/webhookHandler");
+const webhookStore_1 = require("./github/webhookStore");
 const redis_1 = require("./lib/redis");
 const store_2 = require("./billing/store");
 const popularPackageRefresh_1 = require("./scan/popularPackageRefresh");
@@ -252,7 +253,12 @@ app.post("/billing/webhook", express_1.default.urlencoded({ extended: false }), 
 // what GitHub actually signed.
 app.post("/api/github/webhooks", express_1.default.raw({ type: "application/json" }), async (req, res) => {
     try {
-        await withTimeout((0, webhookHandler_1.handlePullRequestWebhook)(req, res));
+        await withTimeout((0, webhookHandler_1.createWebhookHandler)({
+            store: (0, webhookStore_1.createDurableWebhookStore)(),
+            process: async (_payload, deliveryId) => {
+                console.info(JSON.stringify({ event: "webhook_processing_deferred", deliveryId }));
+            },
+        })(req, res));
     }
     catch (error) {
         console.error(JSON.stringify({ event: "webhook_failed", error: error instanceof Error ? error.message : "unknown" }));

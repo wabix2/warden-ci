@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export type WebhookStatus = "received" | "processing" | "processed" | "failed";
+export type WebhookStatus = "received" | "processing" | "processed" | "failed" | "dead_letter";
 
 export interface WebhookRecord {
   deliveryId: string;
@@ -18,6 +18,7 @@ export interface WebhookStore {
   claim(record: WebhookRecord): Promise<"claimed" | "duplicate" | "stale">;
   markProcessed(deliveryId: string): Promise<void>;
   markFailed(deliveryId: string, error: string): Promise<void>;
+  get?(deliveryId: string): Promise<WebhookRecord | null>;
 }
 
 export function webhookFingerprint(rawBody: Buffer): string {

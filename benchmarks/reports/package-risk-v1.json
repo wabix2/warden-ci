@@ -45,9 +45,9 @@
     "unknownRate": 0.2,
     "registryUnavailableRate": 0.2,
     "latencyMs": {
-      "p50": 0.013,
-      "p95": 0.209,
-      "p99": 0.209
+      "p50": 0.012,
+      "p95": 0.197,
+      "p99": 0.197
     }
   },
   "byCategory": {
@@ -92,7 +92,7 @@
       "unknown": 2
     }
   },
-  "elapsedMs": 0.868,
+  "elapsedMs": 0.842,
   "results": [
     {
       "id": "safe-popular",
@@ -105,7 +105,7 @@
         "latestVersion": "18.3.1"
       },
       "actual": "safe",
-      "latencyMs": 0.209,
+      "latencyMs": 0.197,
       "pass": true
     },
     {
@@ -119,7 +119,7 @@
         "latestVersion": "1.2.0"
       },
       "actual": "safe",
-      "latencyMs": 0.047,
+      "latencyMs": 0.034,
       "pass": true
     },
     {
@@ -134,7 +134,7 @@
         "latestVersion": "0.4.0"
       },
       "actual": "safe",
-      "latencyMs": 0.01,
+      "latencyMs": 0.008,
       "pass": true
     },
     {
@@ -147,7 +147,7 @@
         "lookupStatus": "not_found"
       },
       "actual": "hallucinated",
-      "latencyMs": 0.014,
+      "latencyMs": 0.013,
       "pass": true
     },
     {
@@ -174,7 +174,7 @@
         "publishedDaysAgo": 5
       },
       "actual": "typosquat-suspect",
-      "latencyMs": 0.158,
+      "latencyMs": 0.151,
       "pass": true
     },
     {
@@ -190,7 +190,7 @@
         "latestReleaseDaysAgo": 3
       },
       "actual": "dependency-confusion-suspect",
-      "latencyMs": 0.019,
+      "latencyMs": 0.017,
       "pass": true
     },
     {
@@ -209,7 +209,7 @@
         "latestReleaseDaysAgo": 4
       },
       "actual": "maintainer-takeover-suspect",
-      "latencyMs": 0.013,
+      "latencyMs": 0.012,
       "pass": true
     },
     {
@@ -222,7 +222,7 @@
         "lookupStatus": "unavailable"
       },
       "actual": "registry-unavailable",
-      "latencyMs": 0.003,
+      "latencyMs": 0.004,
       "pass": true
     },
     {

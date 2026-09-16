@@ -22,7 +22,7 @@
 | Coverage | 0.8 |
 | UNKNOWN rate | 0.2 |
 | Registry-unavailable rate | 0.2 |
-| Latency p50/p95/p99 | 0.013 / 0.209 / 0.209 ms |
+| Latency p50/p95/p99 | 0.012 / 0.197 / 0.197 ms |
 
 ## Limitations
 

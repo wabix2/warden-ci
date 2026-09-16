@@ -69,7 +69,7 @@ export async function authorizeInstallationRepository(token: string, installatio
 export async function authorizeInstallationRepositoryWrite(token: string, installationId: number, repositoryId: number, githubFetch: typeof fetch): Promise<"authorized" | "forbidden"> {
   if (!Number.isSafeInteger(installationId) || !Number.isSafeInteger(repositoryId) || installationId <= 0 || repositoryId <= 0) return "forbidden";
   const repositories = await accessibleRepositories(installationId, token, githubFetch);
-  return repositories.some((repository) => repository.id === repositoryId && repository.permissions?.[REQUIRED_REPOSITORY_PERMISSION] === true && repository.permissions?.[REQUIRED_WRITE_PERMISSION] === true) ? "authorized" : "forbidden";
+  return repositories.some((repository) => repository.id === repositoryId && repository.permissions?.[REQUIRED_REPOSITORY_PERMISSION] === true && repository.permissions?.[REQUIRED_WRITE_PERMISSION] === true && repository.permissions?.admin !== true) ? "authorized" : "forbidden";
 }
 
 export async function authorizeRunAccessWithDependencies(req: Request, runId: string, dependencies: AuthorizationDependencies): Promise<RunAccessResult> {

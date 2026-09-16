@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.schema = exports.remediations = exports.suppressions = exports.policyVersions = exports.auditEvents = exports.findings = exports.scanRuns = exports.entitlements = exports.policies = exports.repositories = exports.installations = void 0;
+exports.schema = exports.remediations = exports.suppressions = exports.policyVersions = exports.auditEvents = exports.findings = exports.scanRuns = exports.githubWebhookEvents = exports.entitlements = exports.policies = exports.repositories = exports.installations = void 0;
 const pg_core_1 = require("drizzle-orm/pg-core");
 exports.installations = (0, pg_core_1.pgTable)("warden_installations", {
     id: (0, pg_core_1.uuid)("id").defaultRandom().primaryKey(), githubInstallationId: (0, pg_core_1.integer)("github_installation_id").notNull().unique(), accountLogin: (0, pg_core_1.text)("account_login").notNull(), accountType: (0, pg_core_1.text)("account_type").notNull(), plan: (0, pg_core_1.text)("plan").notNull().default("free"), createdAt: (0, pg_core_1.timestamp)("created_at", { withTimezone: true }).notNull().defaultNow(), updatedAt: (0, pg_core_1.timestamp)("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -13,6 +13,21 @@ exports.policies = (0, pg_core_1.pgTable)("warden_policies", {
 });
 exports.entitlements = (0, pg_core_1.pgTable)("warden_entitlements", {
     id: (0, pg_core_1.uuid)("id").defaultRandom().primaryKey(), installationId: (0, pg_core_1.uuid)("installation_id").notNull(), provider: (0, pg_core_1.text)("provider").notNull().default("gumroad"), providerReference: (0, pg_core_1.text)("provider_reference").notNull().unique(), plan: (0, pg_core_1.text)("plan").notNull(), status: (0, pg_core_1.text)("status").notNull(), currentPeriodEnd: (0, pg_core_1.timestamp)("current_period_end", { withTimezone: true }), updatedAt: (0, pg_core_1.timestamp)("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+exports.githubWebhookEvents = (0, pg_core_1.pgTable)("warden_github_webhook_events", {
+    id: (0, pg_core_1.uuid)("id").defaultRandom().primaryKey(),
+    deliveryId: (0, pg_core_1.text)("delivery_id").notNull().unique(),
+    event: (0, pg_core_1.text)("event").notNull(),
+    installationId: (0, pg_core_1.integer)("installation_id"),
+    repositoryId: (0, pg_core_1.integer)("repository_id"),
+    occurredAt: (0, pg_core_1.timestamp)("occurred_at", { withTimezone: true }),
+    fingerprint: (0, pg_core_1.text)("fingerprint").notNull(),
+    status: (0, pg_core_1.text)("status").notNull().default("received"),
+    attempt: (0, pg_core_1.integer)("attempt").notNull().default(0),
+    error: (0, pg_core_1.text)("error"),
+    processedAt: (0, pg_core_1.timestamp)("processed_at", { withTimezone: true }),
+    createdAt: (0, pg_core_1.timestamp)("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: (0, pg_core_1.timestamp)("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 exports.scanRuns = (0, pg_core_1.pgTable)("warden_scan_runs", {
     id: (0, pg_core_1.uuid)("id").defaultRandom().primaryKey(), repositoryId: (0, pg_core_1.uuid)("repository_id").notNull(), githubDeliveryId: (0, pg_core_1.text)("github_delivery_id").unique(), pullRequestNumber: (0, pg_core_1.integer)("pull_request_number"), commitSha: (0, pg_core_1.text)("commit_sha").notNull(), status: (0, pg_core_1.text)("status").notNull().default("queued"), verdict: (0, pg_core_1.text)("verdict"), findingsCount: (0, pg_core_1.integer)("findings_count").notNull().default(0), startedAt: (0, pg_core_1.timestamp)("started_at", { withTimezone: true }), completedAt: (0, pg_core_1.timestamp)("completed_at", { withTimezone: true }), createdAt: (0, pg_core_1.timestamp)("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -32,4 +47,4 @@ exports.suppressions = (0, pg_core_1.pgTable)("warden_suppressions", {
 exports.remediations = (0, pg_core_1.pgTable)("warden_remediations", {
     id: (0, pg_core_1.uuid)("id").defaultRandom().primaryKey(), findingId: (0, pg_core_1.uuid)("finding_id").notNull(), installationId: (0, pg_core_1.uuid)("installation_id").notNull(), repositoryId: (0, pg_core_1.uuid)("repository_id").notNull(), packageName: (0, pg_core_1.text)("package_name").notNull(), targetVersion: (0, pg_core_1.text)("target_version").notNull(), status: (0, pg_core_1.text)("status").notNull().default("requested"), branchName: (0, pg_core_1.text)("branch_name"), pullRequestNumber: (0, pg_core_1.integer)("pull_request_number"), pullRequestUrl: (0, pg_core_1.text)("pull_request_url"), verificationStatus: (0, pg_core_1.text)("verification_status"), createdAt: (0, pg_core_1.timestamp)("created_at", { withTimezone: true }).notNull().defaultNow(), updatedAt: (0, pg_core_1.timestamp)("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({ uniqueTarget: (0, pg_core_1.unique)().on(table.installationId, table.repositoryId, table.findingId, table.targetVersion) }));
-exports.schema = { installations: exports.installations, repositories: exports.repositories, policies: exports.policies, entitlements: exports.entitlements, scanRuns: exports.scanRuns, findings: exports.findings, auditEvents: exports.auditEvents, policyVersions: exports.policyVersions, suppressions: exports.suppressions, remediations: exports.remediations };
+exports.schema = { installations: exports.installations, repositories: exports.repositories, policies: exports.policies, entitlements: exports.entitlements, githubWebhookEvents: exports.githubWebhookEvents, scanRuns: exports.scanRuns, findings: exports.findings, auditEvents: exports.auditEvents, policyVersions: exports.policyVersions, suppressions: exports.suppressions, remediations: exports.remediations };

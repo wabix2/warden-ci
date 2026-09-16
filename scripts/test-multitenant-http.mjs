@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { authorizeInstallationRepository, authorizeRunAccessWithDependencies } from "../dist/auth/runAccess.js";
+import { authorizeInstallationRepository, authorizeInstallationRepositoryWrite, authorizeRunAccessWithDependencies } from "../dist/auth/runAccess.js";
 
 function request(session = "A") {
   return { headers: { cookie: `warden_session=${session.repeat(32)}` } };
@@ -18,7 +18,7 @@ test("tenant A can access only the repository returned by its GitHub installatio
 });
 
 test("write access requires both pull and push permissions", async () => {
-  assert.equal(await authorizeInstallationRepository("token-a", 10, 20, githubFetchFor(20, { pull: true, push: false })), "forbidden");
+  assert.equal(await authorizeInstallationRepositoryWrite("token-a", 10, 20, githubFetchFor(20, { pull: true, push: false })), "forbidden");
 });
 
 test("run access maps missing database rows to not_found without leaking ownership", async () => {
