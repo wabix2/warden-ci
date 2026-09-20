@@ -268,6 +268,15 @@ app.post(
   },
 );
 
+// Plain liveness check on the webhook URL itself. GitHub only ever POSTs real
+// deliveries here, but some review/monitoring tooling does a bare GET to confirm
+// the endpoint isn't dead before anything else happens — without this, that GET
+// falls through to Express's default 404, which can look like the app is broken.
+// This intentionally does nothing except confirm the process is up and reachable.
+app.get("/api/github/webhooks", (_req: Request, res: Response) => {
+  res.status(200).json({ ok: true, service: "warden-ci-webhooks" });
+});
+
 // GitHub webhook MUST receive the raw request body for HMAC signature verification —
 // same reasoning as the Gumroad webhook above, registered before express.json() for
 // the same reason: JSON.stringify(JSON.parse(body)) is not guaranteed to byte-match
