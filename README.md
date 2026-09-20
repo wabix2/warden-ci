@@ -25,15 +25,15 @@ package names).
   the diff (never pre-existing code the PR didn't touch):
   - `ecosystems/` — one adapter per package registry (`npm.ts`, `pypi.ts`),
     each implementing import extraction + registry metadata lookup behind a
-    shared interface (`ecosystems/types.ts`). Adding a third registry
-    (crates.io, RubyGems) means writing one more adapter file, not touching
-    the detection logic.
+  shared interface (`ecosystems/types.ts`). npm, PyPI, crates.io, Go modules,
+  and RubyGems are registered; the crates.io adapter also parses Cargo.toml
+  dependency tables with a TOML-aware parser.
   - `riskSignals.ts` — the actual detector: a package with no registry entry
     is `hallucinated`; a package that exists but was published within the
     last 45 days *and* sits within edit-distance 2 of a popular package name
-    (`popularPackages.ts`) is `typosquat-suspect`. This is meaningfully
-    harder to replicate than a plain existence check — see "Differentiation"
-    below.
+    (`popularPackages.ts`) is `typosquat-suspect`. This is a useful signal, not
+    a defensible moat; free competitors also provide existence and typosquat
+    checks. The compounding asset is the privacy-safe detection corpus below.
   - `secrets.ts` — flags likely hardcoded credentials.
   - `dangerousExec.ts` — flags `eval()`, `new Function()`, unguarded shell exec.
   - `diff.ts` — parses GitHub's unified diff `patch` field into added lines
@@ -72,16 +72,26 @@ the actual attempt at defensibility, in honest current state:
    candidates; complete snapshots are ranked to the top 100, cached in Redis,
    and retained in memory when sources fail. The refresh never runs on the PR
    request path. Public metadata cannot prove a private-name collision: classic dependency confusion requires an organization's internal package list. Warden therefore uses only a narrow high-version/thin-history proxy, and maintainer-change detection is npm-only because PyPI JSON does not expose uploader identity.
-3. **Multi-ecosystem breadth (`ecosystems/`)** — npm and PyPI both work
-   today, behind a shared interface designed so a third registry is an
-   adapter, not a rewrite. **Status: built and live** for these two;
-   crates.io/RubyGems are not implemented.
+3. **Multi-ecosystem breadth (`ecosystems/`)** — npm, PyPI, crates.io, Go
+  modules, and RubyGems have registered adapters. Cargo source imports and
+  Cargo.toml dependency tables are parsed. **Status: adapters implemented;
+  live popular-package refresh is only verified for npm and PyPI.**
+  Cargo/Go/Ruby typosquat protection remains explicitly limited until a
+  current ranking source is configured.
 4. **Upstream integration (`ide-extension/`)** — the biggest actual moat
    candidate, since it puts the check where the hallucination originates
    (accepting an AI suggestion) rather than after it's committed. **Status:
    a real but minimal scaffold** — npm existence checks only, no
    typosquat/PyPI parity, and not published anywhere. Publishing needs a VS
    Code Marketplace publisher account, which is a step only you can do.
+
+<!-- GENERATED_ECOSYSTEM_STATUS -->
+- npm: .js, .jsx, .ts, .tsx, .mjs, .cjs, .mts, .cts (147 popular references; refresh-backed)
+- pypi: .py (108 popular references; refresh-backed)
+- cargo: .rs, .toml (0 popular references; no live ranking source configured)
+- go: .go (4 popular references; no live ranking source configured)
+- rubygems.org: .rb, .gemspec, .gemfile (0 popular references; no live ranking source configured)
+<!-- END_GENERATED_ECOSYSTEM_STATUS -->
 
 ## Not yet built
 

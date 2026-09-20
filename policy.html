@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Policy editor — Warden CI</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #090d12; color: #e5e7eb; margin: 0; padding: 32px; }
+  main { max-width: 960px; margin: auto; }
+  header { border-bottom: 1px solid #263241; padding-bottom: 24px; margin-bottom: 24px; }
+  h1 { font-size: 28px; margin: 0 0 6px; }
+  h2 { font-size: 18px; margin: 0 0 4px; }
+  h3 { font-size: 15px; margin: 0 0 10px; }
+  .muted { color: #94a3b8; }
+  .error { padding: 16px; border: 1px solid #7f1d1d; border-radius: 8px; background: #2a1115; color: #fecaca; }
+  .card { border: 1px solid #263241; border-radius: 8px; padding: 18px; margin-top: 16px; background: #111821; }
+  .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+  .label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: .04em; }
+  .customer-links { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+  .customer-links a { display: inline-flex; padding: 9px 12px; border: 1px solid #2dd4bf; border-radius: 7px; color: #99f6e4; text-decoration: none; }
+  select, input[type="text"], input[type="email"], input[type="date"] {
+    background: #0b1219; color: #e5e7eb; border: 1px solid #263241; border-radius: 6px; padding: 8px 10px; font: inherit;
+  }
+  select:focus, input:focus { outline: 2px solid #2563eb; outline-offset: 1px; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .seg { display: inline-flex; border: 1px solid #263241; border-radius: 8px; overflow: hidden; }
+  .seg button { background: transparent; color: #cbd5e1; border: 0; padding: 9px 16px; cursor: pointer; font: inherit; }
+  .seg button[aria-pressed="true"] { background: #2563eb; color: #fff; }
+  .seg button:disabled { opacity: .45; cursor: not-allowed; }
+  .checks { display: flex; gap: 18px; flex-wrap: wrap; }
+  .check { display: inline-flex; gap: 8px; align-items: center; color: #cbd5e1; }
+  .tags { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  .tag { display: inline-flex; gap: 8px; align-items: center; background: #0b1219; border: 1px solid #263241; border-radius: 999px; padding: 5px 6px 5px 12px; font-size: 13px; font-family: ui-monospace, monospace; }
+  .tag button { background: #1f2937; color: #fca5a5; border: 0; border-radius: 999px; width: 20px; height: 20px; cursor: pointer; line-height: 1; }
+  .add-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn { padding: 9px 14px; border: 0; border-radius: 6px; cursor: pointer; font: inherit; }
+  .btn.primary { background: #2563eb; color: #fff; }
+  .btn.primary:disabled { opacity: .6; cursor: default; }
+  .btn.ghost { background: #1f2937; color: #e5e7eb; }
+  .field-error { color: #fca5a5; font-size: 13px; min-height: 16px; }
+  .upgrade { color: #fcd34d; font-size: 13px; }
+  .upgrade a { color: #fcd34d; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid #1e2733; vertical-align: top; }
+  th { color: #94a3b8; text-transform: uppercase; font-size: 11px; letter-spacing: .04em; }
+  td.mono { font-family: ui-monospace, monospace; word-break: break-all; }
+  .preview { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+  .preview .num { font-size: 26px; font-weight: 700; }
+  .preview .num.block { color: #fca5a5; }
+  .preview .num.ok { color: #86efac; }
+  .headline { font-size: 15px; margin: 0 0 12px; }
+  .headline b { color: #fca5a5; }
+  .save-row { display: flex; gap: 12px; align-items: center; margin-top: 20px; }
+  .save-msg { font-size: 14px; }
+  .save-msg.ok { color: #86efac; }
+  .save-msg.err { color: #fca5a5; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="muted">Warden security gate / Policy editor</p>
+    <h1>Enforcement policy</h1>
+    <p class="muted" id="subtitle">Choose how findings are gated. Report mode surfaces findings without blocking; block mode fails the check.</p>
+    <nav class="customer-links" aria-label="Policy actions">
+      <a href="/dashboard">Open dashboard</a>
+      <a href="/details">Reports</a>
+      <a href="/subscribe?plan=pro">Upgrade to Pro</a>
+    </nav>
+  </header>
+
+  <div class="row" id="installation-row">
+    <div class="field">
+      <label class="label" for="installation">Installation</label>
+      <select id="installation" aria-label="Installation"></select>
+    </div>
+    <div class="muted" id="pro-state"></div>
+  </div>
+
+  <section id="content" class="muted">Verifying your GitHub session…</section>
+
+  <div id="editor" class="hidden">
+    <section class="card">
+      <div class="card-head"><h2>Enforcement mode</h2></div>
+      <div class="seg" role="group" aria-label="Enforcement mode">
+        <button type="button" id="mode-report" data-mode="report" aria-pressed="true">Report only</button>
+        <button type="button" id="mode-block" data-mode="block" aria-pressed="false">Block</button>
+      </div>
+      <p class="field-error" id="err-mode"></p>
+      <p class="upgrade hidden" id="mode-upgrade"></p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Thresholds</h2></div>
+      <div class="row">
+        <div class="field">
+          <label class="label" for="minimumSeverity">Minimum severity to block</label>
+          <select id="minimumSeverity">
+            <option value="warning">Warning and above</option>
+            <option value="failure">Failure only</option>
+          </select>
+        </div>
+      </div>
+      <p class="field-error" id="err-minimumSeverity"></p>
+      <h3 style="margin-top:16px">Block categories</h3>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="cat-secret" value="secret"> Secrets</label>
+        <label class="check"><input type="checkbox" id="cat-execution" value="execution"> Dangerous execution</label>
+        <label class="check"><input type="checkbox" id="cat-dependency" value="dependency"> Dependencies</label>
+      </div>
+      <p class="field-error" id="err-blockCategories"></p>
+      <div class="checks" style="margin-top:16px">
+        <label class="check"><input type="checkbox" id="requireCleanBaseline"> Require clean baseline</label>
+        <label class="check"><input type="checkbox" id="failOnIncomplete"> Fail on incomplete scans</label>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Ignored paths</h2></div>
+      <p class="muted">Glob patterns skipped entirely (e.g. <code>**/fixtures/**</code>).</p>
+      <div class="tags" id="ignoredPaths-tags"></div>
+      <div class="add-row">
+        <input type="text" id="ignoredPaths-input" placeholder="**/vendor/**" aria-label="Add ignored path">
+        <button type="button" class="btn ghost" data-add="ignoredPaths">Add</button>
+      </div>
+      <p class="field-error" id="err-ignoredPaths"></p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Ignored packages</h2></div>
+      <p class="muted">Package names never flagged as dependency findings.</p>
+      <div class="tags" id="ignoredPackages-tags"></div>
+      <div class="add-row">
+        <input type="text" id="ignoredPackages-input" placeholder="left-pad" aria-label="Add ignored package">
+        <button type="button" class="btn ghost" data-add="ignoredPackages">Add</button>
+      </div>
+      <p class="field-error" id="err-ignoredPackages"></p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Live preview</h2><span class="muted" id="preview-run"></span></div>
+      <p class="headline" id="preview-headline">Evaluating against your most recent scan…</p>
+      <div class="preview" id="preview-grid"></div>
+    </section>
+
+    <div class="save-row">
+      <button type="button" class="btn primary" id="save">Save policy</button>
+      <span class="save-msg" id="save-msg"></span>
+    </div>
+
+    <section class="card">
+      <div class="card-head"><h2>Suppressions</h2><span class="muted">Owner, reason, and expiry are required.</span></div>
+      <table>
+        <thead><tr><th>Fingerprint</th><th>Owner</th><th>Reason</th><th>Expires</th><th></th></tr></thead>
+        <tbody id="suppressions-body"><tr><td colspan="5" class="muted">No suppressions.</td></tr></tbody>
+      </table>
+      <div class="add-row" style="margin-top:12px">
+        <input type="text" id="sup-fingerprint" placeholder="fingerprint or category:path:line" aria-label="Suppression fingerprint">
+        <input type="email" id="sup-owner" placeholder="owner@example.com" aria-label="Suppression owner">
+        <input type="text" id="sup-reason" placeholder="Tracked issue WARDEN-000" aria-label="Suppression reason">
+        <input type="date" id="sup-expires" aria-label="Suppression expiry">
+        <button type="button" class="btn ghost" id="add-suppression">Add suppression</button>
+      </div>
+      <p class="field-error" id="err-suppression"></p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Revision history</h2></div>
+      <table>
+        <thead><tr><th>Version</th><th>Mode</th><th>Author</th><th>When</th></tr></thead>
+        <tbody id="history-body"><tr><td colspan="4" class="muted">No revisions yet.</td></tr></tbody>
+      </table>
+    </section>
+  </div>
+</main>
+<script>
+const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
+}[char]));
+
+const content = document.getElementById("content");
+const editor = document.getElementById("editor");
+const installationSelect = document.getElementById("installation");
+const proState = document.getElementById("pro-state");
+
+const state = {
+  installationId: null,
+  isPro: false,
+  ignoredPaths: [],
+  ignoredPackages: [],
+  mode: "report",
+};
+
+const qsInstallation = new URLSearchParams(location.search).get("installationId");
+
+function setFieldError(field, message) {
+  const el = document.getElementById("err-" + field);
+  if (el) el.textContent = message || "";
+}
+function clearErrors() {
+  document.querySelectorAll(".field-error").forEach((el) => (el.textContent = ""));
+}
+
+function renderTags(field) {
+  const box = document.getElementById(field + "-tags");
+  const values = state[field];
+  box.innerHTML = values.length
+    ? values.map((value, i) => `<span class="tag">${escapeHtml(value)}<button type="button" data-remove="${field}" data-index="${i}" aria-label="Remove ${escapeHtml(value)}">×</button></span>`).join("")
+    : `<span class="muted">None</span>`;
+}
+
+function setMode(mode) {
+  if (mode === "block" && !state.isPro) return;
+  state.mode = mode;
+  document.getElementById("mode-report").setAttribute("aria-pressed", String(mode === "report"));
+  document.getElementById("mode-block").setAttribute("aria-pressed", String(mode === "block"));
+  schedulePreview();
+}
+
+function collectPolicy() {
+  const blockCategories = ["secret", "execution", "dependency"].filter((c) => document.getElementById("cat-" + c).checked);
+  return {
+    schema: "v1",
+    mode: state.mode,
+    minimumSeverity: document.getElementById("minimumSeverity").value,
+    failOnIncomplete: document.getElementById("failOnIncomplete").checked,
+    blockCategories,
+    ignoredPaths: state.ignoredPaths,
+    ignoredPackages: state.ignoredPackages,
+    requireCleanBaseline: document.getElementById("requireCleanBaseline").checked,
+    suppressions: [],
+  };
+}
+
+function applyPolicy(policy) {
+  state.mode = policy.mode === "block" && state.isPro ? "block" : policy.mode === "block" ? "report" : policy.mode;
+  document.getElementById("mode-report").setAttribute("aria-pressed", String(state.mode === "report"));
+  document.getElementById("mode-block").setAttribute("aria-pressed", String(state.mode === "block"));
+  document.getElementById("minimumSeverity").value = policy.minimumSeverity;
+  document.getElementById("failOnIncomplete").checked = Boolean(policy.failOnIncomplete);
+  document.getElementById("requireCleanBaseline").checked = Boolean(policy.requireCleanBaseline);
+  ["secret", "execution", "dependency"].forEach((c) => {
+    document.getElementById("cat-" + c).checked = (policy.blockCategories || []).includes(c);
+  });
+  state.ignoredPaths = Array.isArray(policy.ignoredPaths) ? [...policy.ignoredPaths] : [];
+  state.ignoredPackages = Array.isArray(policy.ignoredPackages) ? [...policy.ignoredPackages] : [];
+  renderTags("ignoredPaths");
+  renderTags("ignoredPackages");
+}
+
+function applyProState() {
+  const blockBtn = document.getElementById("mode-block");
+  const upgrade = document.getElementById("mode-upgrade");
+  blockBtn.disabled = !state.isPro;
+  proState.textContent = state.isPro ? "Pro plan active" : "Free plan";
+  if (state.isPro) {
+    upgrade.classList.add("hidden");
+  } else {
+    upgrade.classList.remove("hidden");
+    upgrade.innerHTML = `Block mode requires Pro. <a href="/subscribe?plan=pro">Upgrade to Pro</a> to fail checks automatically.`;
+  }
+}
+
+function renderSuppressions(rows) {
+  const body = document.getElementById("suppressions-body");
+  body.innerHTML = rows.length
+    ? rows.map((row) => `<tr>
+        <td class="mono">${escapeHtml(row.fingerprint)}</td>
+        <td>${escapeHtml(row.owner)}</td>
+        <td>${escapeHtml(row.reason)}</td>
+        <td>${escapeHtml(row.expiresAt ? new Date(row.expiresAt).toISOString().slice(0, 10) : "—")}</td>
+        <td><button type="button" class="btn ghost" data-remove-sup="${escapeHtml(row.id)}">Remove</button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="5" class="muted">No suppressions.</td></tr>`;
+}
+
+function renderHistory(rows) {
+  const body = document.getElementById("history-body");
+  body.innerHTML = rows.length
+    ? rows.map((row) => `<tr>
+        <td>v${escapeHtml(row.version)}</td>
+        <td>${escapeHtml(row.mode || "—")}</td>
+        <td>${escapeHtml(row.createdBy)}</td>
+        <td>${escapeHtml(row.createdAt ? new Date(row.createdAt).toLocaleString() : "—")}</td>
+      </tr>`).join("")
+    : `<tr><td colspan="4" class="muted">No revisions yet.</td></tr>`;
+}
+
+let previewTimer = null;
+function schedulePreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(runPreview, 350);
+}
+
+async function runPreview() {
+  const grid = document.getElementById("preview-grid");
+  const headline = document.getElementById("preview-headline");
+  const runLabel = document.getElementById("preview-run");
+  try {
+    const res = await fetch("/api/policy/preview", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ installationId: state.installationId, policy: collectPolicy() }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || "Preview unavailable");
+    if (!body.hasRun) {
+      headline.textContent = "No scans recorded yet for this installation — the preview will populate after the first scan.";
+      runLabel.textContent = "";
+      grid.innerHTML = "";
+      return;
+    }
+    runLabel.textContent = "run " + String(body.runId).slice(0, 8);
+    const delta = body.delta;
+    const willBlock = body.proposed.shouldBlock;
+    headline.innerHTML = delta === 0
+      ? `This policy blocks <b>${body.proposed.blocking}</b> of ${body.findings} finding(s) from the last scan — no change from the current policy.`
+      : delta > 0
+        ? `This policy would newly block <b>${delta}</b> more finding(s) (from ${body.current.blocking} to ${body.proposed.blocking} of ${body.findings}).`
+        : `This policy would block <b>${Math.abs(delta)}</b> fewer finding(s) (from ${body.current.blocking} to ${body.proposed.blocking} of ${body.findings}).`;
+    grid.innerHTML = `
+      <div><div class="label">Would block</div><div class="num ${body.proposed.blocking ? "block" : "ok"}">${body.proposed.blocking}</div></div>
+      <div><div class="label">Suppressed</div><div class="num">${body.proposed.suppressed}</div></div>
+      <div><div class="label">Ignored</div><div class="num">${body.proposed.ignored}</div></div>
+      <div><div class="label">Check result</div><div class="num ${willBlock ? "block" : "ok"}">${willBlock ? "FAIL" : "PASS"}</div></div>`;
+  } catch (error) {
+    headline.textContent = error.message;
+    grid.innerHTML = "";
+  }
+}
+
+async function loadPolicy() {
+  clearErrors();
+  editor.classList.add("hidden");
+  content.classList.remove("hidden");
+  content.textContent = "Loading policy…";
+  try {
+    const res = await fetch("/api/policy?installationId=" + encodeURIComponent(state.installationId), { credentials: "same-origin" });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || "Could not load policy");
+    state.isPro = Boolean(body.isPro);
+    applyProState();
+    applyPolicy(body.policy);
+    renderSuppressions(body.suppressions || []);
+    renderHistory(body.history || []);
+    content.classList.add("hidden");
+    editor.classList.remove("hidden");
+    runPreview();
+  } catch (error) {
+    content.classList.remove("hidden");
+    content.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function save() {
+  clearErrors();
+  const msg = document.getElementById("save-msg");
+  const btn = document.getElementById("save");
+  msg.className = "save-msg";
+  msg.textContent = "Saving…";
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/policy", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ installationId: state.installationId, policy: collectPolicy() }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 402) {
+      setFieldError("mode", "");
+      const upgrade = document.getElementById("mode-upgrade");
+      upgrade.classList.remove("hidden");
+      upgrade.innerHTML = `${escapeHtml(body.error || "Upgrade required")} <a href="${escapeHtml(body.upgradeUrl || "/subscribe?plan=pro")}">Upgrade to Pro</a>`;
+      msg.className = "save-msg err";
+      msg.textContent = "Block mode not saved.";
+      setMode("report");
+      return;
+    }
+    if (res.status === 422 && body.field) {
+      setFieldError(body.field, body.error);
+      msg.className = "save-msg err";
+      msg.textContent = "Fix the highlighted field.";
+      return;
+    }
+    if (!res.ok) throw new Error(body.error || "Could not save policy");
+    msg.className = "save-msg ok";
+    msg.textContent = "Saved as v" + body.activeVersion + ".";
+    await loadPolicy();
+  } catch (error) {
+    msg.className = "save-msg err";
+    msg.textContent = error.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function addSuppression() {
+  setFieldError("suppression", "");
+  const fingerprint = document.getElementById("sup-fingerprint").value.trim();
+  const owner = document.getElementById("sup-owner").value.trim();
+  const reason = document.getElementById("sup-reason").value.trim();
+  const expires = document.getElementById("sup-expires").value;
+  if (!fingerprint || !owner || !reason || !expires) {
+    setFieldError("suppression", "Fingerprint, owner, reason, and expiry are all required.");
+    return;
+  }
+  try {
+    const res = await fetch("/api/policy/suppressions", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ installationId: state.installationId, fingerprint, owner, reason, expiresAt: new Date(expires).toISOString() }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || "Could not save suppression");
+    document.getElementById("sup-fingerprint").value = "";
+    document.getElementById("sup-owner").value = "";
+    document.getElementById("sup-reason").value = "";
+    document.getElementById("sup-expires").value = "";
+    await loadPolicy();
+  } catch (error) {
+    setFieldError("suppression", error.message);
+  }
+}
+
+async function removeSuppression(id) {
+  try {
+    const res = await fetch("/api/policy/suppressions/" + encodeURIComponent(id), { method: "DELETE", credentials: "same-origin" });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || "Could not remove suppression");
+    await loadPolicy();
+  } catch (error) {
+    setFieldError("suppression", error.message);
+  }
+}
+
+// --- Event wiring ---
+document.getElementById("mode-report").addEventListener("click", () => setMode("report"));
+document.getElementById("mode-block").addEventListener("click", () => setMode("block"));
+document.getElementById("minimumSeverity").addEventListener("change", schedulePreview);
+["cat-secret", "cat-execution", "cat-dependency", "requireCleanBaseline", "failOnIncomplete"].forEach((id) => {
+  document.getElementById(id).addEventListener("change", schedulePreview);
+});
+document.querySelectorAll("[data-add]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const field = btn.getAttribute("data-add");
+    const input = document.getElementById(field + "-input");
+    const value = input.value.trim();
+    if (value && !state[field].includes(value)) {
+      state[field].push(value);
+      renderTags(field);
+      schedulePreview();
+    }
+    input.value = "";
+  });
+});
+document.addEventListener("click", (event) => {
+  const removeTag = event.target.closest("[data-remove]");
+  if (removeTag) {
+    const field = removeTag.getAttribute("data-remove");
+    state[field].splice(Number(removeTag.getAttribute("data-index")), 1);
+    renderTags(field);
+    schedulePreview();
+    return;
+  }
+  const removeSup = event.target.closest("[data-remove-sup]");
+  if (removeSup) removeSuppression(removeSup.getAttribute("data-remove-sup"));
+});
+document.getElementById("save").addEventListener("click", save);
+document.getElementById("add-suppression").addEventListener("click", addSuppression);
+installationSelect.addEventListener("change", () => {
+  state.installationId = Number(installationSelect.value);
+  loadPolicy();
+});
+
+(async function init() {
+  try {
+    const res = await fetch("/api/policy/installations", { credentials: "same-origin" });
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 401) throw new Error("Sign in with GitHub to edit your policy. Open the dashboard to authenticate.");
+    if (!res.ok) throw new Error(body.error || "Could not load installations");
+    const list = body.installations || [];
+    if (list.length === 0) {
+      content.innerHTML = `<div class="error">No GitHub App installations found for your account. Install Warden CI on a repository first.</div>`;
+      return;
+    }
+    installationSelect.innerHTML = list.map((row) => `<option value="${escapeHtml(row.installationId)}">${escapeHtml(row.accountLogin)} (${escapeHtml(row.installationId)})</option>`).join("");
+    const preferred = qsInstallation && list.some((r) => String(r.installationId) === String(qsInstallation)) ? qsInstallation : list[0].installationId;
+    installationSelect.value = String(preferred);
+    state.installationId = Number(preferred);
+    document.getElementById("installation-row").style.display = list.length > 1 ? "" : "none";
+    await loadPolicy();
+  } catch (error) {
+    content.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+  }
+})();
+</script>
+</body>
+</html>

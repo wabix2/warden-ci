@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+
+# Packaged extension artifacts
+*.vsix
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs and coverage
+*.log
+coverage/
+
+# OS/editor files
+.DS_Store
+.vscode-test/

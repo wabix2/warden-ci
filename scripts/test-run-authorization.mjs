@@ -24,6 +24,16 @@ const allowed = { installationId: 7, repositoryId: 101 };
 const repo = (id, pull = true) => ({ id, permissions: { pull, push: false, admin: false } });
 
 test("AUTH-1 no session is unauthenticated", async () => assert.equal((await authorizeRunAccessWithDependencies(request(), runId, deps(allowed, [{ repositories: [repo(101)] }]))).kind, "unauthenticated"));
+test("malformed session identifiers are rejected before token lookup", async () => {
+  let reads = 0;
+  const result = await authorizeRunAccessWithDependencies(request("warden_session=bad"), runId, {
+    database: database(allowed),
+    sessionToken: async () => { reads += 1; return "oauth-token"; },
+    githubFetch: async () => new Response(JSON.stringify({ repositories: [] }), { status: 200 }),
+  });
+  assert.equal(result.kind, "forbidden");
+  assert.equal(reads, 1);
+});
 test("AUTH-2 exact repository with pull permission is authorized", async () => assert.equal((await authorizeRunAccessWithDependencies(request("warden_session=s"), runId, deps(allowed, [{ repositories: [repo(101)] }]))).kind, "authorized"));
 test("AUTH-3 different installation is forbidden", async () => assert.equal((await authorizeRunAccessWithDependencies(request("warden_session=s"), runId, deps({ installationId: 22, repositoryId: 202 }, [{ repositories: [repo(101)] }]))).kind, "forbidden"));
 test("AUTH-4 missing run is not found", async () => assert.equal((await authorizeRunAccessWithDependencies(request("warden_session=s"), runId, deps(null, []))).kind, "not_found"));
