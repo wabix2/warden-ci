@@ -1,6 +1,6 @@
-import { Request, Response } from "express";
+﻿import { Request, Response } from "express";
 import { verifyGithubSignature } from "./verifySignature";
-import { processWebhook, validateWebhookIdentity, type WebhookRecord, type WebhookStore } from "./webhookLifecycle";
+import { validateWebhookIdentity, type WebhookRecord, type WebhookStore } from "./webhookLifecycle";
 
 const ACTIONABLE_ACTIONS = new Set(["opened", "synchronize", "reopened"]);
 
@@ -35,10 +35,18 @@ export function createWebhookHandler({ store, process: processEvent }: WebhookPr
     const claim = await store.claim(record);
     if (claim !== "claimed") { res.status(204).send(); return; }
     res.status(202).send();
+    // The event is already claimed above. Do NOT call processWebhook here:
+    // it claims again, sees "processing", and skips the work as a duplicate.
     try {
-      await processWebhook(store, record, () => processEvent(payload, deliveryId));
+      await processEvent(payload, deliveryId);
+      await store.markProcessed(deliveryId);
+      console.log(JSON.stringify({ event: "webhook_processed", deliveryId }));
     } catch (error) {
-      console.error(JSON.stringify({ event: "webhook_processing_failed", deliveryId, error: error instanceof Error ? error.message : "unknown" }));
+      const message = error instanceof Error ? error.message : "unknown webhook failure";
+      console.error(JSON.stringify({ event: "webhook_processing_failed", deliveryId, error: message }));
+      try { await store.markFailed(deliveryId, message); } catch (markError) {
+        console.error(JSON.stringify({ event: "webhook_mark_failed_error", deliveryId, error: markError instanceof Error ? markError.message : "unknown" }));
+      }
     }
   };
 }
