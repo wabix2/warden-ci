@@ -18,6 +18,7 @@ import { repositories, scanRuns, findings, auditEvents, installations, remediati
 import { DEFAULT_POLICY, validatePolicy, evaluateGate, policyAuditEvent, policyToCycloneDx, type EnforcementPolicy, type PolicySuppression, type PolicyDecision } from "./enforcement/policy";
 import { createWebhookHandler } from "./github/webhookHandler";
 import { createDurableWebhookStore } from "./github/webhookStore";
+import { runPullRequestScan } from "./github/pullRequestScan";
 import { getRedisClient } from "./lib/redis";
 import { getGumroadApiToken, verifyGumroadSale } from "./billing/gumroadConnect";
 import { getProRecord, isProActive } from "./billing/store";
@@ -288,8 +289,8 @@ app.post(
     try {
       await withTimeout(createWebhookHandler({
       store: createDurableWebhookStore(),
-      process: async (_payload, deliveryId) => {
-        console.info(JSON.stringify({ event: "webhook_processing_deferred", deliveryId }));
+      process: async (payload, deliveryId) => {
+        await runPullRequestScan(payload, deliveryId, { loadPolicy: (installationId) => loadEffectivePolicy(installationId) });
       },
     })(req, res));
     } catch (error) {
