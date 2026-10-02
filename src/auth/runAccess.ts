@@ -10,9 +10,14 @@ export type RunAccessResult =
   | { kind: "forbidden" }
   | { kind: "authorized"; run: typeof scanRuns.$inferSelect; installationId: number };
 
+type OAuthSessionRecord = { accessToken?: string; login?: string; expiresAt?: number };
+
 export async function sessionTokenFromRequest(req: Request): Promise<string | null> {
   const sessionId = sessionIdFromRequest(req);
-  return sessionId ? getRedisClient().get<string>(`warden:oauth:session:${sessionId}`) : null;
+  if (!sessionId || !/^[A-Za-z0-9_-]{32,256}$/.test(sessionId)) return null;
+  const session = await getRedisClient().get<OAuthSessionRecord>(`warden:oauth:session:${sessionId}`);
+  if (!session || typeof session !== "object" || typeof session.accessToken !== "string" || !session.accessToken || typeof session.expiresAt !== "number" || session.expiresAt <= Date.now()) return null;
+  return session.accessToken;
 }
 
 function sessionIdFromRequest(req: Request): string | undefined {
@@ -64,7 +69,7 @@ export async function authorizeInstallationRepository(token: string, installatio
 export async function authorizeInstallationRepositoryWrite(token: string, installationId: number, repositoryId: number, githubFetch: typeof fetch): Promise<"authorized" | "forbidden"> {
   if (!Number.isSafeInteger(installationId) || !Number.isSafeInteger(repositoryId) || installationId <= 0 || repositoryId <= 0) return "forbidden";
   const repositories = await accessibleRepositories(installationId, token, githubFetch);
-  return repositories.some((repository) => repository.id === repositoryId && repository.permissions?.[REQUIRED_REPOSITORY_PERMISSION] === true && repository.permissions?.[REQUIRED_WRITE_PERMISSION] === true) ? "authorized" : "forbidden";
+  return repositories.some((repository) => repository.id === repositoryId && repository.permissions?.[REQUIRED_REPOSITORY_PERMISSION] === true && repository.permissions?.[REQUIRED_WRITE_PERMISSION] === true && repository.permissions?.admin !== true) ? "authorized" : "forbidden";
 }
 
 export async function authorizeRunAccessWithDependencies(req: Request, runId: string, dependencies: AuthorizationDependencies): Promise<RunAccessResult> {
@@ -93,7 +98,11 @@ export async function authorizeRunAccessWithDependencies(req: Request, runId: st
 export function authorizeRunAccess(req: Request, runId: string): Promise<RunAccessResult> {
   return authorizeRunAccessWithDependencies(req, runId, {
     database: db,
-    sessionToken: (sessionId) => getRedisClient().get<string>(`warden:oauth:session:${sessionId}`),
+    sessionToken: async (sessionId) => {
+      const session = await getRedisClient().get<{ accessToken?: string; expiresAt?: number }>(`warden:oauth:session:${sessionId}`);
+      if (!session?.accessToken || !session.expiresAt || session.expiresAt <= Date.now()) return null;
+      return session.accessToken;
+    },
     githubFetch: fetch,
   });
 }

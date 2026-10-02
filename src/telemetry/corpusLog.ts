@@ -67,7 +67,7 @@ export async function setPrivateCorpusOptIn(installationId: number, enabled: boo
 
 const SAFE_PACKAGE_NAME = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+$/i;
 const ALLOWED_ECOSYSTEMS = new Set(["npm", "pypi", "rust", "ruby"]);
-const ALLOWED_VERDICTS = new Set<Verdict>(["hallucinated", "typosquat-suspect", "dependency-confusion-suspect", "maintainer-takeover-suspect"]);
+const ALLOWED_VERDICTS = new Set<Verdict>(["hallucinated", "typosquat-suspect", "dependency-confusion-suspect", "maintainer-takeover-suspect", "known-malware"]);
 
 export function sanitizeCorpusInput(input: CorpusTelemetryInput): CorpusEvent {
   if (!ALLOWED_ECOSYSTEMS.has(input.ecosystem) || !SAFE_PACKAGE_NAME.test(input.packageName) || input.packageName.length > 214 || !ALLOWED_VERDICTS.has(input.verdict)) {

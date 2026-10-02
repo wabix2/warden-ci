@@ -22,6 +22,9 @@ const REQUEST_TIMEOUT_MS = 4_000;
 // checked-in candidate pool; it is not a claim that the pool is exhaustive.
 const POPULAR_PACKAGE_LIMIT = 100;
 const BOOTSTRAP_NPM = [...POPULAR_NPM_PACKAGES];
+// npm and PyPI expose practical download-ranking endpoints. crates.io, Go
+// modules, and RubyGems do not currently have a stable equivalent used here;
+// those adapters intentionally report no refresh-backed typosquat corpus.
 const BOOTSTRAP_PYPI = [...POPULAR_PYPI_PACKAGES];
 let refreshPromise: Promise<PopularPackageSnapshot | null> | null = null;
 

@@ -12,6 +12,21 @@ export const policies = pgTable("warden_policies", {
 export const entitlements = pgTable("warden_entitlements", {
   id: uuid("id").defaultRandom().primaryKey(), installationId: uuid("installation_id").notNull(), provider: text("provider").notNull().default("gumroad"), providerReference: text("provider_reference").notNull().unique(), plan: text("plan").notNull(), status: text("status").notNull(), currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }), updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+export const githubWebhookEvents = pgTable("warden_github_webhook_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  deliveryId: text("delivery_id").notNull().unique(),
+  event: text("event").notNull(),
+  installationId: integer("installation_id"),
+  repositoryId: integer("repository_id"),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }),
+  fingerprint: text("fingerprint").notNull(),
+  status: text("status").notNull().default("received"),
+  attempt: integer("attempt").notNull().default(0),
+  error: text("error"),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 export const scanRuns = pgTable("warden_scan_runs", {
   id: uuid("id").defaultRandom().primaryKey(), repositoryId: uuid("repository_id").notNull(), githubDeliveryId: text("github_delivery_id").unique(), pullRequestNumber: integer("pull_request_number"), commitSha: text("commit_sha").notNull(), status: text("status").notNull().default("queued"), verdict: text("verdict"), findingsCount: integer("findings_count").notNull().default(0), startedAt: timestamp("started_at", { withTimezone: true }), completedAt: timestamp("completed_at", { withTimezone: true }), createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -30,4 +45,4 @@ export const suppressions = pgTable("warden_suppressions", {
 export const remediations = pgTable("warden_remediations", {
   id: uuid("id").defaultRandom().primaryKey(), findingId: uuid("finding_id").notNull(), installationId: uuid("installation_id").notNull(), repositoryId: uuid("repository_id").notNull(), packageName: text("package_name").notNull(), targetVersion: text("target_version").notNull(), status: text("status").notNull().default("requested"), branchName: text("branch_name"), pullRequestNumber: integer("pull_request_number"), pullRequestUrl: text("pull_request_url"), verificationStatus: text("verification_status"), createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(), updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({ uniqueTarget: unique().on(table.installationId, table.repositoryId, table.findingId, table.targetVersion) }));
-export const schema = { installations, repositories, policies, entitlements, scanRuns, findings, auditEvents, policyVersions, suppressions, remediations };
+export const schema = { installations, repositories, policies, entitlements, githubWebhookEvents, scanRuns, findings, auditEvents, policyVersions, suppressions, remediations };

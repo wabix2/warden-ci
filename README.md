@@ -1,202 +1,261 @@
+<div align="center">
+
+<img src="assets/warden-ci-logo-512.png" alt="Warden CI logo" width="160" />
+
 # Warden CI
 
-<img src="./assets/warden-ci-logo-512.png" alt="Warden CI logo" width="80" />
+### The policy engine for AI-generated code.
 
-A GitHub App that scans pull requests for AI-generated code patterns, dangerous
-`eval()`/`new Function()` usage, hardcoded secrets, and hallucinated npm package
-imports (packages referenced in code that don't actually exist on the npm
-registry — a real supply-chain risk when AI tools invent plausible-sounding
-package names).
+**Block hallucinated packages, leaked secrets, and dangerous code at the pull request, under rules your team writes, reviews, and can audit.**
+
+![Node 18+](https://img.shields.io/badge/node-18%2B-339933?logo=node.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![Ecosystems](https://img.shields.io/badge/ecosystems-npm%20%7C%20PyPI-blue)
+![Output](https://img.shields.io/badge/output-SARIF%20%7C%20CycloneDX-orange)
+
+[**Try it live**](https://warden-ci-dvk5.onrender.com) · [Policy engine docs](POLICY_ENGINE.md) · [Setup](#get-started-in-5-minutes) · [Privacy](PRIVACY.md)
+
+</div>
+
+---
+
+## Scanners tell you. Warden enforces.
+
+Anyone can write a script that checks whether an npm package exists. What teams need when AI tools write a growing share of their code is **enforcement they can roll out safely, defend in an audit, and trust during an incident**:
+
+- **Safe rollout.** Policies default to **report mode**. You review real findings first, then opt into block mode.
+- **Every exception has an owner and an expiry.** No anonymous, permanent "ignore" rules.
+- **A tamper-evident audit trail.** Versioned, optionally signed policy revisions, and audit events that record who changed what, and when.
+- **Deterministic verdicts.** Findings come from registry data and the diff itself. No model guessing whether your code is "probably fine".
+
+That is Warden's policy engine, and it is what separates it from a plain "does this package exist" check.
+
+## The policy engine
+
+Policies use **schema v1** and are edited in a built-in dashboard editor, through a REST API, or from a reviewed `warden-policy.json` in your repo (start from [`warden-policy.example.json`](warden-policy.example.json)).
+
+### Built for enterprise review
+
+| Capability | What it gives you |
+| --- | --- |
+| **Versioned policy** | Every revision has a schema, a revision number, and an optional parent revision. Revisions are immutable: a change writes a new row and never edits history. |
+| **Inheritance** | Repository policies can inherit organization defaults. Child revisions are explicit and incremented. |
+| **Signed revisions** | Deployments can require HMAC-signed policy envelopes (`WARDEN_POLICY_SIGNING_SECRET`), so an unsigned change can't slip through. |
+| **Scoped suppressions** | Every suppression requires an **owner**, a **reason**, a **fingerprint or category scope**, and an **expiration**. |
+| **Audit evidence** | Policy events record the actor, action, revision, mode, timestamp, and a policy digest. |
+| **Standard exports** | SARIF 2.1.0 for GitHub code scanning, and CycloneDX 1.5-compatible vulnerability BOM data. |
+
+### Roll out without breaking anyone's build
+
+New repositories start in **report** mode. You opt into **block** mode once you've reviewed findings and set up protected-branch enforcement.
+
+1. Start with `mode: report` and `failOnIncomplete: false`.
+2. Review the report and suppression ownership weekly.
+3. Add short-lived suppressions only, with an issue or ticket reference in the reason.
+4. Sign policy revisions in CI before switching to `mode: block`.
+5. Turn on protected-branch required checks once the baseline is clean.
+
+Before you flip anything, the **live preview** replays your proposed policy against the stored findings from your most recent scan and shows exactly how many findings it would block, suppress, or ignore, compared with your current policy.
+
+### Policy editor
+
+Open `/policy` from your dashboard to manage everything without touching JSON:
+
+- Enforcement-mode toggle (report / block) and minimum-severity dropdown
+- Block-category checkboxes: `secret`, `execution`, `dependency`
+- Editable lists of ignored paths and ignored packages
+- A suppressions table with required owner, reason, and expiry fields
+- Live preview of the blocking delta, plus inline field-level validation errors on save
+
+### Policy API
+
+Routes authenticate with the dashboard GitHub session and authorize the caller against the installation they own.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/policy/installations` | List the installations you own |
+| `GET /api/policy` | Effective policy, active version, Pro status, suppressions, revision summary |
+| `PUT /api/policy` | Validate and save a new immutable revision, with an audit event (`policy.updated`) |
+| `GET /api/policy/versions` | Full revision history for the audit trail |
+| `POST /api/policy/preview` | Compare blocking / suppressed / ignored counts for the current vs proposed policy |
+| `POST /api/policy/suppressions` | Create or update a suppression (owner, reason, fingerprint, expiry required) |
+| `DELETE /api/policy/suppressions/:id` | Remove a suppression, with an audit event |
+
+The same stored policy drives real scan verdicts in `/api/scan` and the CI gate.
+
+### Safe by default
+
+- **No surprise blocking.** Saving `mode: "block"` requires an active Pro plan, and any entitlement-check error is treated as "not Pro". At scan time, block mode is downgraded to report unless Pro is verified live, so a billing outage never fails your CI job.
+- **No false victory.** Warden never assumes a pull request fixed a vulnerability. A finding is resolved only when a later scan confirms its fingerprint is gone.
+
+Full reference: **[POLICY_ENGINE.md](POLICY_ENGINE.md)**
+
+## What it catches
+
+| Detection | Example |
+| --- | --- |
+| **Hallucinated packages** | An import for a package that has no entry on the npm or PyPI registry. This is a real supply-chain risk when AI tools invent plausible names and attackers register them. |
+| **Typosquat suspects** | A package published in the last 45 days whose name is within edit distance 2 of a popular package. |
+| **Hardcoded secrets** | Likely credentials committed in added lines. |
+| **Dangerous execution** | `eval()`, `new Function()`, unguarded shell exec. |
+
+Warden scans **only the lines a PR adds**. Pre-existing code is never flagged, so adopting it on a mature repo doesn't bury you in noise.
+
+### Beyond "does it exist?"
+
+| | Plain existence check | **Warden CI** |
+| --- | :---: | :---: |
+| Flags nonexistent packages | ✅ | ✅ |
+| Flags recently published near-miss names | ❌ | ✅ |
+| Popularity data refreshed daily (npm downloads API, pypistats.org) | ❌ | ✅ |
+| Multi-ecosystem (npm + PyPI) | Varies | ✅ |
+| Versioned, signable policy with owner-and-expiry suppressions | ❌ | ✅ |
+| SARIF and CycloneDX export | ❌ | ✅ |
+| Audit trail of every policy change | ❌ | ✅ |
+| CI gate that fails on blocking findings | ❌ | ✅ |
+
+> Popularity refreshes run in the background, never on the PR request path, and the last good snapshot is kept if a source goes down. Maintainer-change detection is npm-only, since PyPI's JSON API doesn't expose uploader identity.
 
 ## How it works
 
-- **`src/server.ts`** — the Express server. Serves the landing page, the
-  Gumroad-billed `/subscribe` flow and its webhook (`/billing/webhook`), and
-  registers the GitHub webhook route (`/api/github/webhooks`).
-- **`src/github/webhookHandler.ts`** — receives `pull_request` webhook events
-  (`opened`, `synchronize`, `reopened`), verifies the GitHub signature, lists
-  the PR's changed files, runs the scan, and posts the result as a GitHub
-  Check Run.
-- **`src/github/appAuth.ts`** — authenticates as the GitHub App and mints an
-  installation-scoped Octokit client per repo/org.
-- **`src/github/verifySignature.ts`** — HMAC verification for incoming
-  webhooks, so only requests actually signed by GitHub are processed.
-- **`src/scan/`** — the checks themselves, run only against *added* lines in
-  the diff (never pre-existing code the PR didn't touch):
-  - `ecosystems/` — one adapter per package registry (`npm.ts`, `pypi.ts`),
-    each implementing import extraction + registry metadata lookup behind a
-    shared interface (`ecosystems/types.ts`). Adding a third registry
-    (crates.io, RubyGems) means writing one more adapter file, not touching
-    the detection logic.
-  - `riskSignals.ts` — the actual detector: a package with no registry entry
-    is `hallucinated`; a package that exists but was published within the
-    last 45 days *and* sits within edit-distance 2 of a popular package name
-    (`popularPackages.ts`) is `typosquat-suspect`. This is meaningfully
-    harder to replicate than a plain existence check — see "Differentiation"
-    below.
-  - `secrets.ts` — flags likely hardcoded credentials.
-  - `dangerousExec.ts` — flags `eval()`, `new Function()`, unguarded shell exec.
-  - `diff.ts` — parses GitHub's unified diff `patch` field into added lines
-    with correct new-file line numbers.
-- **`src/telemetry/corpusLog.ts`** — logs flagged-package events (package
-  name, ecosystem, verdict — never code, file paths, or account identity) so
-  the product accumulates a detection history over time. **Enabled for public
-  repositories by default; private repositories require explicit opt-in** — see
-  `PRIVACY.md` for the exact fields, controls, and retention.
-- **`src/billing/store.ts`** — persistent Pro-status tracking via Upstash Redis,
-  keyed by GitHub account/org login.
-- **`ide-extension/`** — a separate, minimal VS Code extension scaffold. See
-  "Differentiation" below — this is genuinely unfinished, not just undocumented.
+```mermaid
+flowchart LR
+    A[Pull request<br/>opened / synchronize / reopened] --> B[Verify GitHub<br/>webhook signature]
+    B --> C[Parse diff:<br/>added lines only]
+    C --> D[Scan + apply<br/>your policy]
+    D --> E[Check Run<br/>on the PR]
+```
 
-## Differentiation — the four things meant to make this hard to just copy
+1. GitHub sends a `pull_request` webhook to `/api/github/webhooks`.
+2. Warden verifies the HMAC signature, so only requests signed by GitHub are processed.
+3. It scans the added lines with correct new-file line numbers.
+4. Findings are evaluated against your policy and posted as a **Warden CI** Check Run.
 
-A plain "does this package exist" check is trivial to replicate — a
-competitor (or GitHub itself) could ship it in an afternoon. The product moat
-is the enforcement workflow: deterministic evidence, fail-closed policy, and
-an audit trail that teams can trust during an incident. These four are
-the actual attempt at defensibility, in honest current state:
+## Plans
 
-1. **Detection corpus (`telemetry/corpusLog.ts`)** — every flagged package,
-   logged over time, across every install. This is the strongest one: it
-   compounds with usage, so a competitor starting later has no way to
-   shortcut past your history. **Status: enabled for public-repository scans.**
-   Raw events expire after 90 days and aggregate counts after 365 days. Private
-   repositories are excluded by default, and each installation can opt out (or
-   explicitly opt in for private scans). The logger stores only ecosystem,
-   package name, verdict, optional impersonated package, and timestamp — never
-   code, paths, repository names, identity, or installation IDs.
-2. **Package-risk signals (`riskSignals.ts`)** — catches near-miss
-   package names published recently, not just nonexistent ones. **Status:
-   built and live**, using a daily background refresh from npm's official
-   downloads API and pypistats.org. The checked-in lists are bootstrap
-   candidates; complete snapshots are ranked to the top 100, cached in Redis,
-   and retained in memory when sources fail. The refresh never runs on the PR
-   request path. Public metadata cannot prove a private-name collision: classic dependency confusion requires an organization's internal package list. Warden therefore uses only a narrow high-version/thin-history proxy, and maintainer-change detection is npm-only because PyPI JSON does not expose uploader identity.
-3. **Multi-ecosystem breadth (`ecosystems/`)** — npm and PyPI both work
-   today, behind a shared interface designed so a third registry is an
-   adapter, not a rewrite. **Status: built and live** for these two;
-   crates.io/RubyGems are not implemented.
-4. **Upstream integration (`ide-extension/`)** — the biggest actual moat
-   candidate, since it puts the check where the hallucination originates
-   (accepting an AI suggestion) rather than after it's committed. **Status:
-   a real but minimal scaffold** — npm existence checks only, no
-   typosquat/PyPI parity, and not published anywhere. Publishing needs a VS
-   Code Marketplace publisher account, which is a step only you can do.
+| | **Free** | **Pro** |
+| --- | :---: | :---: |
+| Public repository scanning | ✅ | ✅ |
+| Private repository scanning | | ✅ |
+| Blocking checks | | ✅ |
 
-## Not yet built
+Pro is billed through Gumroad. See [`BILLING_SETUP.md`](BILLING_SETUP.md) if you're self-hosting.
 
-Beyond what's noted above: no production `/fix` auto-remediation; a side-effect-free deterministic engine prototype exists for npm `package.json` and Python `requirements.txt`, but it is not exposed until GitHub write authorization, branch/commit/PR operations, persistence, and verification are implemented and no `issue_comment`
-handling. `/details?runId=...` is now an authenticated per-run security report. The
-server uses GitHub's documented `GET /user/installations/{installation_id}/repositories`
-endpoint with the OAuth user's token and authorizes only when the exact repository
-stored on the run is returned with `permissions.pull: true`. Read access is the
-intentional minimum for viewing reports; organization ownership is not claimed.
-`/details` without a run ID remains the public landing page. Private-repo scanning IS now gated on
-Pro status (`isProActive` in `billing/store.ts`, checked in
-`webhookHandler.ts` before scanning private repos) — that used to be sold but
-unenforced; it's enforced now.
+## Get started in 5 minutes
 
-## Pricing
-
-Configurable via the `GUMROAD_CHECKOUT_*` and `GUMROAD_PRODUCT_*` env vars — see below. Only
-plans with configured Gumroad values are shown to customers on `/subscribe`.
-The current paid boundary is intentionally narrow and enforceable. Gumroad Pro is the only sellable paid tier; Team and Enterprise are not advertised as active products:
-
-- **Free**: public repository scanning.
-- **Pro**: private repository scanning plus blocking checks.
-- **Team** / **Enterprise**: hidden until their organization controls and audit
-  workflows are implemented; do not sell capabilities that are not live.
-
-## Setup
+### 1. Install
 
 ```bash
 npm install
-cp .env.example .env
+cp .env.example .env     # fill in values; comments explain each one
 ```
 
-Fill in `.env` — see the comments in `.env.example` for where each value comes
-from. For the Gumroad side specifically, follow [`BILLING_SETUP.md`](./BILLING_SETUP.md)
-step by step.
+### 2. Create the GitHub App
 
-### GitHub App setup (required for scanning to work at all)
+1. Go to <https://github.com/settings/apps/new>. [`app.yml`](app.yml) is a reference for permissions and events.
+2. Permissions: `checks: write`, `contents: read`, `pull requests: read`. Subscribe to the `pull_request` event.
+3. Set the **Webhook URL** to `https://<your-domain>/api/github/webhooks`.
+4. Put the webhook secret in `GITHUB_WEBHOOK_SECRET`, the full `.pem` private key in `GITHUB_PRIVATE_KEY`, and the App ID in `GITHUB_APP_ID`.
+5. Install the app on a test repo and open a PR that imports a fake package. A **Warden CI** Check Run appears with findings.
 
-1. Create a GitHub App at <https://github.com/settings/apps/new> (or use
-   `app.yml` as a reference for the permissions/events to select: `checks:
-   write`, `contents: read`, `pull requests: read`, subscribed to the
-   `pull_request` event).
-2. Set the **Webhook URL** to `https://<your-deployed-domain>/api/github/webhooks`.
-3. Generate a **Webhook secret** — put it in `GITHUB_WEBHOOK_SECRET`.
-4. Generate a **private key** (downloads a `.pem`) — paste its full contents
-   into `GITHUB_PRIVATE_KEY`.
-5. Copy the **App ID** into `GITHUB_APP_ID`.
-6. Install the app on a test repo, open a PR that imports a nonexistent
-   package or a hardcoded-looking secret, and confirm a "Warden CI" Check
-   Run appears with findings.
-
-## Local development
+### 3. Run locally
 
 ```bash
 npm run dev
 ```
 
-Use [smee.io](https://smee.io) or the GitHub CLI's webhook forwarding to route
-webhook deliveries to your local machine while developing.
+Forward webhooks to your machine with [smee.io](https://smee.io) or the GitHub CLI.
 
-## Deploying
+## Use it in CI and editors
 
-Standard Node app — `npm run build && npm start`. Works on Render, Fly.io,
-Railway, or anywhere else that runs Node 18+.
+```bash
+export WARDEN_URL="https://<your-domain>"
+export WARDEN_API_TOKEN="<token>"
 
-### Run ownership migration
+pnpm warden-scan path/to/diff.patch   # exit code 1 = gate failed
+```
 
-For an existing database, deploy `migrations/0002_installation_scoped_reports.sql`
-first. Then run `pnpm db:ownership:report` with the production
-`DATABASE_URL`. This is a read-only, fail-closed report: it confirms ownership
-only through the authoritative `scan_run.repository_id -> repository.id ->
-installation.id` chain and never infers ownership from names, current webhooks,
-or user input.
+A reference workflow is at [`.github/workflows/warden-scan.yml`](.github/workflows/warden-scan.yml). It fails closed on blocking findings and needs the `WARDEN_URL` and `WARDEN_API_TOKEN` repository secrets. The endpoint rejects unauthenticated requests and never sends your source to telemetry.
 
-Do not run the apply command until the report has zero unresolved runs and zero
-integrity errors. Then run `pnpm db:ownership:apply`, which applies the two
-foreign keys transactionally and is safe to rerun. Verify the report again,
-then deploy the application and test one authorized report request plus one
-cross-installation denial. No historical ownership is guessed or silently
-rewritten; unresolved rows remain inaccessible to reports and require manual
-review using authoritative records.
+| Format | Use it for |
+| --- | --- |
+| `?format=sarif` | GitHub code-scanning-compatible results |
+| `?format=cyclonedx` | Dependency inventory exchange |
 
-**Free-tier note**: Render's free tier spins down after ~15 minutes of
-inactivity and restarts on the next request. Billing state now survives this
-correctly (see `billing/store.ts`, backed by Upstash Redis — this replaced an
-earlier in-memory version that silently lost every customer's Pro access on
-every restart). If you're taking real payments, consider whether the ~30s
-cold-start delay after a spin-down is acceptable for your customers, or
-whether it's time to move to a paid instance.
+## Security by design
 
-## Enterprise outputs and policy
+- **Signed webhooks only.** HMAC verification on every delivery.
+- **Least-privilege reports.** `/details?runId=...` is authorized only when GitHub confirms the viewer has pull access to the exact repository on that run. No broad organization scope is requested.
+- **Fail-closed admin.** Telemetry settings are installation-wide, and GitHub's APIs can't prove installation-wide admin authority from a repo-level check, so Warden denies access rather than guessing.
+- **Private by default.** Telemetry stores only ecosystem, package name, verdict, optional impersonated package, and timestamp. It never stores code, paths, repository names, identity, or installation IDs. It's on for public repos, off for private repos unless the installation opts in, and every installation can opt out. Raw events expire after 90 days, aggregates after 365. Details in [`PRIVACY.md`](PRIVACY.md).
 
-The scan API supports `?format=sarif` for GitHub code-scanning-compatible results and `?format=cyclonedx` for dependency inventory exchange. Copy `warden-policy.example.json` to `warden-policy.json` and review it in code review; policy history and suppressions are persisted in Neon so exceptions are attributable and can expire.
+## Deploy
 
-Telemetry settings are installation-wide mutations, not repository-scoped report reads. GitHub's documented OAuth repository-listing API proves access to specific repositories but does not prove installation-wide administrative authority or organization ownership. Warden therefore fails closed for telemetry-settings access rather than granting every repository reader installation-wide control. Run reports continue to use the exact-repository `permissions.pull` check. The OAuth flow requests no broad organization scope.
+A standard Node app for Node 18+:
 
-The repository also includes `.github/workflows/warden-scan.yml` as a reference GitHub Action. It fails closed when the API reports blocking findings and requires `WARDEN_URL` plus `WARDEN_API_TOKEN` repository secrets.
+```bash
+npm run build && npm start
+```
 
-## Local and CI scanning
+Configs for [Fly.io](fly.toml), [Vercel](vercel.json) and [Docker](Dockerfile) are included. Runbooks are in [`OPERATIONS.md`](OPERATIONS.md).
 
-Warden exposes the same scanner through a token-protected API for CI and editor integrations. Set `WARDEN_URL` and `WARDEN_API_TOKEN`, then run `pnpm warden-scan path/to/diff.patch`; exit code 1 means the gate failed. The endpoint rejects unauthenticated requests and does not send source contents to telemetry.
+> **Free-tier note:** Render's free tier spins down after about 15 minutes idle (roughly 30 s cold start). Billing state survives restarts via Upstash Redis, but consider a paid instance if you take real payments.
 
-## Before going live — checklist
+<details>
+<summary><strong>Upgrading an existing database: run ownership migration</strong></summary>
 
-- [ ] All `GUMROAD_CHECKOUT_*` and `GUMROAD_PRODUCT_*` values are configured.
-- [ ] `GUMROAD_WEBHOOK_SECRET` is configured and Gumroad pings
-      `https://<your-deployed-domain>/billing/webhook`.
-- [ ] Gumroad products and recurring billing settings are live and reviewed.
+<br />
 
-- [ ] `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` are set — without
-      these, Pro status won't persist at all.
-- [ ] Fill in the `[DATE]`, `[YOUR COMPANY/NAME]`, and `[YOUR SUPPORT EMAIL]`
-      placeholders in [`TERMS.md`](./TERMS.md) and [`PRIVACY.md`](./PRIVACY.md)
-      — don't launch with placeholder legal text.
-- [ ] Test the full paid flow once in sandbox mode before flipping to
-      production: private repo → PR → upgrade link → checkout → webhook
-      received (check Render logs for `[billing] received Gumroad webhook`) →
-      re-sync the PR → scan runs instead of showing the upgrade gate.
+1. Deploy `migrations/0002_installation_scoped_reports.sql`.
+2. Run `pnpm db:ownership:report` against production `DATABASE_URL`. It is read-only, fails closed, and verifies ownership only through `scan_run.repository_id → repository.id → installation.id`.
+3. Continue only when it shows **zero unresolved runs and zero integrity errors**.
+4. Run `pnpm db:ownership:apply` (transactional, safe to rerun).
+5. Re-run the report, deploy, then test one authorized report request and one cross-installation denial.
+
+Nothing is guessed or silently rewritten. Unresolved rows stay inaccessible until reviewed manually.
+
+</details>
+
+## Project structure
+
+```
+src/
+├── server.ts                  Express server, landing page, billing, webhook route
+├── github/                    webhookHandler · appAuth · verifySignature
+├── scan/
+│   ├── ecosystems/            One adapter per registry (npm.ts, pypi.ts)
+│   ├── riskSignals.ts         hallucinated + typosquat-suspect detection
+│   ├── secrets.ts             Hardcoded credential detection
+│   ├── dangerousExec.ts       eval / new Function / shell exec
+│   └── diff.ts                Unified diff → added lines with line numbers
+├── telemetry/corpusLog.ts     Privacy-scoped flagged-package log
+└── billing/store.ts           Pro status (Upstash Redis)
+ide-extension/                 VS Code extension scaffold
+migrations/                    Database migrations
+```
+
+Adding a registry (crates.io, RubyGems) means writing one adapter file against the shared interface in `src/scan/ecosystems/types.ts`. The detection logic doesn't change.
+
+## Roadmap
+
+- **IDE extension:** a VS Code scaffold exists (npm existence checks only) and isn't published yet.
+- **`/fix` auto-remediation:** a deterministic engine prototype exists for `package.json` and `requirements.txt`. It ships once GitHub write authorization, branch/PR operations, persistence and verification are in place.
+- **`issue_comment` commands:** not implemented.
+- **More registries:** crates.io and RubyGems.
+- **Team / Enterprise:** coming once organization controls and audit workflows are live.
+
+## Docs
+
+[`POLICY_ENGINE.md`](POLICY_ENGINE.md) · [`BILLING_SETUP.md`](BILLING_SETUP.md) · [`OPERATIONS.md`](OPERATIONS.md) · [`PRIVACY.md`](PRIVACY.md) · [`TERMS.md`](TERMS.md) · [`REFUND.md`](REFUND.md)
+
+## Contributing
+
+Issues and pull requests are welcome. Run `pre-commit install` before your first commit.
+
+---
+
+<div align="center">
+
+**[Try Warden CI →](https://warden-ci-dvk5.onrender.com)**
+
+</div>
