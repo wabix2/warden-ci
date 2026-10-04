@@ -54,7 +54,7 @@ export function checkSecrets(addedLines: AddedLine[]): Finding[] {
       if (pattern.regex.test(content)) {
         findings.push({
           line,
-          message: `Possible hardcoded ${pattern.name} in this line. Move secrets to environment variables or a secrets manager instead of committing them.`,
+          message: `Possible secret (${pattern.name}) on this line. Move secrets to environment variables or a secrets manager instead of committing them.`,
         });
         break; // one finding per line is enough
       }

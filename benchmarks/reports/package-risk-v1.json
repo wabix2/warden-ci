@@ -1,0 +1,242 @@
+{
+  "dataset": "warden-package-risk-v1",
+  "datasetType": "synthetic-fixture",
+  "evaluationDate": "2026-09-16",
+  "provenance": {
+    "source": "synthetic local fixtures",
+    "retrievalDate": "2026-09-16",
+    "registry": "recorded metadata"
+  },
+  "labelMethodology": "Fixture labels are explicit expected states; unresolved examples must not be included in accuracy metrics.",
+  "exclusions": [],
+  "distributions": {
+    "ecosystems": {
+      "npm": 10
+    },
+    "categories": {
+      "legitimate-popular": 1,
+      "legitimate-niche": 1,
+      "legitimate-new": 1,
+      "nonexistent": 2,
+      "typosquat": 1,
+      "dependency-confusion": 1,
+      "suspicious-existing": 1,
+      "registry-unavailable": 2
+    }
+  },
+  "scanner": "riskSignals",
+  "fixtureCount": 10,
+  "passed": 10,
+  "failed": 0,
+  "confusion": {
+    "tp": 5,
+    "tn": 3,
+    "fp": 0,
+    "fn": 0
+  },
+  "metrics": {
+    "precision": 1,
+    "recall": 1,
+    "f1": 1,
+    "specificity": 1,
+    "falsePositiveRate": 0,
+    "falseNegativeRate": 0,
+    "coverage": 0.8,
+    "unknownRate": 0.2,
+    "registryUnavailableRate": 0.2,
+    "latencyMs": {
+      "p50": 0.012,
+      "p95": 0.197,
+      "p99": 0.197
+    }
+  },
+  "byCategory": {
+    "legitimate-popular": {
+      "count": 1,
+      "passed": 1,
+      "unknown": 0
+    },
+    "legitimate-niche": {
+      "count": 1,
+      "passed": 1,
+      "unknown": 0
+    },
+    "legitimate-new": {
+      "count": 1,
+      "passed": 1,
+      "unknown": 0
+    },
+    "nonexistent": {
+      "count": 2,
+      "passed": 2,
+      "unknown": 0
+    },
+    "typosquat": {
+      "count": 1,
+      "passed": 1,
+      "unknown": 0
+    },
+    "dependency-confusion": {
+      "count": 1,
+      "passed": 1,
+      "unknown": 0
+    },
+    "suspicious-existing": {
+      "count": 1,
+      "passed": 1,
+      "unknown": 0
+    },
+    "registry-unavailable": {
+      "count": 2,
+      "passed": 2,
+      "unknown": 2
+    }
+  },
+  "elapsedMs": 0.842,
+  "results": [
+    {
+      "id": "safe-popular",
+      "category": "legitimate-popular",
+      "packageName": "react",
+      "expected": "safe",
+      "metadata": {
+        "existsOnRegistry": true,
+        "lookupStatus": "ok",
+        "latestVersion": "18.3.1"
+      },
+      "actual": "safe",
+      "latencyMs": 0.197,
+      "pass": true
+    },
+    {
+      "id": "safe-niche",
+      "category": "legitimate-niche",
+      "packageName": "useful-niche-lib",
+      "expected": "safe",
+      "metadata": {
+        "existsOnRegistry": true,
+        "lookupStatus": "ok",
+        "latestVersion": "1.2.0"
+      },
+      "actual": "safe",
+      "latencyMs": 0.034,
+      "pass": true
+    },
+    {
+      "id": "safe-new",
+      "category": "legitimate-new",
+      "packageName": "fresh-legitimate-lib",
+      "expected": "safe",
+      "metadata": {
+        "existsOnRegistry": true,
+        "lookupStatus": "ok",
+        "publishedDaysAgo": 12,
+        "latestVersion": "0.4.0"
+      },
+      "actual": "safe",
+      "latencyMs": 0.008,
+      "pass": true
+    },
+    {
+      "id": "nonexistent-plausible",
+      "category": "nonexistent",
+      "packageName": "react-server-helper-plus",
+      "expected": "hallucinated",
+      "metadata": {
+        "existsOnRegistry": false,
+        "lookupStatus": "not_found"
+      },
+      "actual": "hallucinated",
+      "latencyMs": 0.013,
+      "pass": true
+    },
+    {
+      "id": "nonexistent-ai-style",
+      "category": "nonexistent",
+      "packageName": "warden-ai-generated-package-does-not-exist",
+      "expected": "hallucinated",
+      "metadata": {
+        "existsOnRegistry": false,
+        "lookupStatus": "not_found"
+      },
+      "actual": "hallucinated",
+      "latencyMs": 0.004,
+      "pass": true
+    },
+    {
+      "id": "typosquat-deletion",
+      "category": "typosquat",
+      "packageName": "recat",
+      "expected": "typosquat-suspect",
+      "metadata": {
+        "existsOnRegistry": true,
+        "lookupStatus": "ok",
+        "publishedDaysAgo": 5
+      },
+      "actual": "typosquat-suspect",
+      "latencyMs": 0.151,
+      "pass": true
+    },
+    {
+      "id": "confusion-internal",
+      "category": "dependency-confusion",
+      "packageName": "internal-utils",
+      "expected": "dependency-confusion-suspect",
+      "metadata": {
+        "existsOnRegistry": true,
+        "lookupStatus": "ok",
+        "latestVersion": "10.0.0",
+        "releaseCount": 1,
+        "latestReleaseDaysAgo": 3
+      },
+      "actual": "dependency-confusion-suspect",
+      "latencyMs": 0.017,
+      "pass": true
+    },
+    {
+      "id": "takeover",
+      "category": "suspicious-existing",
+      "packageName": "express",
+      "expected": "maintainer-takeover-suspect",
+      "metadata": {
+        "existsOnRegistry": true,
+        "lookupStatus": "ok",
+        "publisherChangedRecently": true,
+        "publisherHistory": [
+          "old",
+          "new"
+        ],
+        "latestReleaseDaysAgo": 4
+      },
+      "actual": "maintainer-takeover-suspect",
+      "latencyMs": 0.012,
+      "pass": true
+    },
+    {
+      "id": "outage-timeout",
+      "category": "registry-unavailable",
+      "packageName": "registry-timeout",
+      "expected": "registry-unavailable",
+      "metadata": {
+        "existsOnRegistry": false,
+        "lookupStatus": "unavailable"
+      },
+      "actual": "registry-unavailable",
+      "latencyMs": 0.004,
+      "pass": true
+    },
+    {
+      "id": "outage-rate-limit",
+      "category": "registry-unavailable",
+      "packageName": "registry-rate-limited",
+      "expected": "registry-unavailable",
+      "metadata": {
+        "existsOnRegistry": false,
+        "lookupStatus": "unavailable"
+      },
+      "actual": "registry-unavailable",
+      "latencyMs": 0.003,
+      "pass": true
+    }
+  ]
+}

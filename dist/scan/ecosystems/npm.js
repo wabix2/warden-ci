@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.npmEcosystem = void 0;
 const module_1 = require("module");
 const popularPackages_1 = require("../popularPackages");
+const registry_1 = require("./registry");
 const IMPORT_PATTERNS = [
     /\bfrom\s+['"]([^'"]+)['"]/g,
     /\brequire\(\s*['"]([^'"]+)['"]\s*\)/g,
@@ -37,7 +38,7 @@ function extractPackages(addedLines) {
     }
     return linesByPackage;
 }
-async function fetchMetadata(packageName) {
+async function fetchMetadataUncached(packageName) {
     const encoded = packageName.startsWith("@")
         ? `@${encodeURIComponent(packageName.slice(1))}`
         : encodeURIComponent(packageName);
@@ -47,7 +48,7 @@ async function fetchMetadata(packageName) {
             // 404 = genuinely doesn't exist. Any other non-OK status is treated as
             // "exists" (fail open) since we can't distinguish a real 404 from a
             // registry hiccup any other way with this endpoint.
-            return { existsOnRegistry: res.status !== 404 };
+            return (0, registry_1.metadataFromResponse)(res.status);
         }
         const data = (await res.json());
         const created = data.time?.created;
@@ -60,13 +61,14 @@ async function fetchMetadata(packageName) {
         const previousPublisher = publisherSequence.at(-2);
         const publishedDaysAgo = created ? Math.floor((Date.now() - new Date(created).getTime()) / (1000 * 60 * 60 * 24)) : undefined;
         const latestReleaseDaysAgo = latestRelease ? Math.floor((Date.now() - new Date(latestRelease).getTime()) / (1000 * 60 * 60 * 24)) : undefined;
-        return { existsOnRegistry: true, publishedDaysAgo, latestVersion, releaseCount: releaseTimes.length, publisherHistory, latestPublisher, publisherChangedRecently: Boolean(latestPublisher && previousPublisher && latestPublisher !== previousPublisher), latestReleaseDaysAgo };
+        return { lookupStatus: "ok", existsOnRegistry: true, publishedDaysAgo, latestVersion, releaseCount: releaseTimes.length, publisherHistory, latestPublisher, publisherChangedRecently: Boolean(latestPublisher && previousPublisher && latestPublisher !== previousPublisher), latestReleaseDaysAgo };
     }
     catch (err) {
         console.error(`npm metadata lookup failed for "${packageName}":`, err);
-        return { existsOnRegistry: true }; // fail open on network errors
+        return { existsOnRegistry: false, lookupStatus: "unavailable" };
     }
 }
+const fetchMetadata = (packageName) => (0, registry_1.cachedMetadata)(exports.npmEcosystem, packageName, () => fetchMetadataUncached(packageName));
 exports.npmEcosystem = {
     id: "npm",
     label: "npm",

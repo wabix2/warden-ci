@@ -1,0 +1,19 @@
+{
+  "id": "warden-package-risk-v1",
+  "datasetType": "synthetic-fixture",
+  "evaluationDate": "2026-09-16",
+  "source": "Deterministic local metadata fixtures; not a real-world accuracy claim.",
+  "popularPackages": ["react", "express", "lodash", "requests", "serde", "gin"],
+  "fixtures": [
+    {"id":"safe-popular","category":"legitimate-popular","packageName":"react","expected":"safe","metadata":{"existsOnRegistry":true,"lookupStatus":"ok","latestVersion":"18.3.1"}},
+    {"id":"safe-niche","category":"legitimate-niche","packageName":"useful-niche-lib","expected":"safe","metadata":{"existsOnRegistry":true,"lookupStatus":"ok","latestVersion":"1.2.0"}},
+    {"id":"safe-new","category":"legitimate-new","packageName":"fresh-legitimate-lib","expected":"safe","metadata":{"existsOnRegistry":true,"lookupStatus":"ok","publishedDaysAgo":12,"latestVersion":"0.4.0"}},
+    {"id":"nonexistent-plausible","category":"nonexistent","packageName":"react-server-helper-plus","expected":"hallucinated","metadata":{"existsOnRegistry":false,"lookupStatus":"not_found"}},
+    {"id":"nonexistent-ai-style","category":"nonexistent","packageName":"warden-ai-generated-package-does-not-exist","expected":"hallucinated","metadata":{"existsOnRegistry":false,"lookupStatus":"not_found"}},
+    {"id":"typosquat-deletion","category":"typosquat","packageName":"recat","expected":"typosquat-suspect","metadata":{"existsOnRegistry":true,"lookupStatus":"ok","publishedDaysAgo":5}},
+    {"id":"confusion-internal","category":"dependency-confusion","packageName":"internal-utils","expected":"dependency-confusion-suspect","metadata":{"existsOnRegistry":true,"lookupStatus":"ok","latestVersion":"10.0.0","releaseCount":1,"latestReleaseDaysAgo":3}},
+    {"id":"takeover","category":"suspicious-existing","packageName":"express","expected":"maintainer-takeover-suspect","metadata":{"existsOnRegistry":true,"lookupStatus":"ok","publisherChangedRecently":true,"publisherHistory":["old","new"],"latestReleaseDaysAgo":4}},
+    {"id":"outage-timeout","category":"registry-unavailable","packageName":"registry-timeout","expected":"registry-unavailable","metadata":{"existsOnRegistry":false,"lookupStatus":"unavailable"}},
+    {"id":"outage-rate-limit","category":"registry-unavailable","packageName":"registry-rate-limited","expected":"registry-unavailable","metadata":{"existsOnRegistry":false,"lookupStatus":"unavailable"}}
+  ]
+}
