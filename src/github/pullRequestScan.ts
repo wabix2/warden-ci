@@ -100,8 +100,12 @@ export async function runPullRequestScan(payload: any, deliveryId: string, deps:
     }
   }
 
+  const detailsUrl = scanRunId
+    ? `${CANONICAL_BASE_URL}/details?runId=${encodeURIComponent(scanRunId)}`
+    : `${CANONICAL_BASE_URL}/dashboard`;
+
   const checkRun = await octokit.checks.create({
-    owner, repo, name: CHECK_NAME, head_sha: headSha, status: "in_progress",
+    owner, repo, name: CHECK_NAME, head_sha: headSha, status: "in_progress", details_url: detailsUrl,
     output: { title: "Warden CI is scanning this pull request", summary: "Fetching changed files and evaluating policy." },
   });
 
@@ -163,7 +167,7 @@ export async function runPullRequestScan(payload: any, deliveryId: string, deps:
 
     await octokit.checks.update({
       owner, repo, check_run_id: checkRun.data.id,
-      status: "completed", conclusion,
+      status: "completed", conclusion, details_url: detailsUrl,
       output: {
         title: annotations.length === 0 ? "No issues found" : `${annotations.length} finding(s)`,
         summary: summarize(annotations, filesScanned, filesSkipped) + reportLink,
